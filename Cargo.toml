@@ -1,0 +1,27 @@
+[package]
+name = "openshmem"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+description = "OpenSHMEM-style partitioned global address space (PGAS) library for Rust, built on pmix-rs (bootstrap) + ucx-rs (RMA/atomics) + ucc-rs (collectives)."
+license = "MIT"
+
+[dependencies]
+pmix = { path = "../pmix-rs" }
+ucx-sys = { path = "../ucx-rs" }
+ucc = { path = "../ucc-rs", optional = true }
+
+[features]
+default = ["collectives"]
+# Collectives via UCC. Disable to build RMA/atomics only when no UCC is available.
+collectives = ["dep:ucc"]
+
+[dev-dependencies]
+
+[[example]]
+name = "ping_put_get"
+required-features = []
+
+[[example]]
+name = "barrier"
+required-features = ["collectives"]
