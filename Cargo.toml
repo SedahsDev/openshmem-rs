@@ -12,16 +12,8 @@ ucx-sys = { path = "../ucx-rs" }
 ucc = { path = "../ucc-rs", optional = true }
 
 [features]
-default = ["collectives"]
-# Collectives via UCC. Disable to build RMA/atomics only when no UCC is available.
+default = []
+# Collectives via UCC. Enable only when a UCC lib is available (none installed here).
 collectives = ["dep:ucc"]
 
 [dev-dependencies]
-
-[[example]]
-name = "ping_put_get"
-required-features = []
-
-[[example]]
-name = "barrier"
-required-features = ["collectives"]

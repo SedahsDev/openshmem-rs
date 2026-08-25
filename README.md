@@ -17,9 +17,13 @@ object allocated at rank `i` is addressable from every other rank at the same
 virtual offset. The reference implementation splits this across three substrates,
 and so do we:
 
-- **Symmetric memory** is allocated with a Rust allocator and registered with UCX
+- **Symmetric memory** is allocated from a **vendored pool** (jemalloc-derived,
+  modified to hand back an address-like `usize`) and registered with UCX
   (`MemHandle::map`). The registration yields an rkey (`pack_rkey`) that each peer
   unpacks (`RemoteKey::unpack`) to form a remote-memory handle for that PE's heap.
+  Allocations are wrapped in a private [`SymPtr`](src/symheap.rs) — a `usize`
+  convertible to the UCX remote pointer (`u64`) for a target PE — never a raw
+  `*mut u8` that leaks across PEs.
 - **Put/get/atomics** are issued on a UCX worker/endpoint pair to each peer PE
   (`rma_put`, `rma_get`, `amo_add64`, …), giving us `shmem_*_put`, `shmem_*_get`,
   and the `shmem_atomic_*` family.

@@ -19,7 +19,7 @@ The mapping mirrors how `osss-ucx/src/shmemc/ucx/*` wires the same three C libra
 |-----------|-------------------|------------|
 | `shmem_init` / `shmem_finalize` | `init::init()` / `init::finalize()` | `pmix::init` / finalize |
 | `shmem_my_pe` / `shmem_n_pes` | `init::my_pe()` / `init::n_pes()` | PMIx rank / universe size |
-| `shmem_malloc` / `shmem_free` | `symheap::SymAlloc::{malloc,free}` | UCX `MemHandle::map` / unmap |
+| `shmem_malloc` / `shmem_free` | `symheap::SymAlloc::{malloc,free}` | Vendored jemalloc pool + UCX `MemHandle::map` / unmap |
 | `shmem_<t>_put` / `shmem_<t>_get` | `rma::put<T>` / `rma::get<T>` | UCX `rma_put` / `rma_get` |
 | `shmem_atomic_*` / fetch ops | `rma::atomic_*` | UCX `amo_*64` (+ `reply_buffer`) |
 | `shmem_fence` / `shmem_quiet` | `rma::fence()` / `rma::quiet()` | `ucp_ep_fence_nbx` / `ucp_ep_flush_nbx` |
@@ -41,6 +41,22 @@ The mapping mirrors how `osss-ucx/src/shmemc/ucx/*` wires the same three C libra
 3. `pmix::put_value` worker addr + packed rkey + heap base; `commit`; `fence`.
 4. `pmix::get_value` each peer PE → unpack rkey → `RemoteKey`, build per-PE endpoint.
 5. RMA/atomics now addressable on the peer's symmetric heap.
+
+## Symmetric addressing (`SymPtr`)
+
+Allocations from the symmetric heap are wrapped in a private `usize` ([`SymPtr`]
+in `src/symheap.rs`) rather than exposed as raw pointers, because the same virtual
+offset maps to different physical addresses on different PEs. The mapping follows
+OSSS-UCX's `comms.c` `translate_address` / `get_remote_key_and_addr` flow:
+
+- `SymPtr::offset_from(local_heap_base) -> u64` — the allocation's virtual offset.
+- `SymPtr::to_remote_addr(peer_heap_base) -> u64` — the UCX remote pointer for a
+  target PE; symmetric addressing means every PE computes the same value for the
+  same virtual offset.
+- `rma::put/get` pass this `u64` plus the peer's unpacked `RemoteKey` to UCX.
+
+Application code cannot build a `SymPtr` from a raw pointer; only `SymAlloc`
+produces them, and only the crate converts them to remote addresses.
 
 ## Native libs
 
