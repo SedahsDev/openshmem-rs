@@ -924,8 +924,10 @@ mod pod_tests {
 
     #[test]
     // The public `atomic_*` wrappers and signed bit-pattern casts are runtime-
-    // untested pending an AMO-capable DVM; the gap is accepted until then.
-    #[ignore = "self transport cannot execute UCX atomics (no AM handler); requires atomic-capable transport or DVM"]
+    // The public wrappers and signed bit-pattern casts are runtime-untested
+    // pending a multi-PE AMO-capable fixture; the loopback endpoint cannot
+    // exercise UCX atomics.
+    #[ignore = "loopback self transport cannot execute UCX atomics (no AM handler); requires a multi-PE AMO-capable fixture"]
     fn loopback_integer_atomics_use_real_completion_and_fetch_replies() {
         let transport = UcxTransport::new(1).expect("UCX transport");
         let mut target = vec![0_u64; 1];
