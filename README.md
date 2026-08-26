@@ -20,6 +20,11 @@ installed and set `UCC_INCLUDE_DIR` and `UCC_LIB_DIR` (or set `UCC_PREFIX`). The
 `ucc` dependency is feature-gated because there is no system
 `pkg-config` UCC entry.
 
+Blocking collectives wait before returning. The feature-gated `coll::*_nb`
+variants return a `CollectiveRequest`; call `test()` to poll or `wait()` to
+drive UCC progress to completion. UCX tag-matching fallback collectives are
+not included yet and remain future work.
+
 The CI checks compile and test the library without requiring a PMIx DVM or
 daemon. DVM-backed integration tests require a PRRTE installation and its
 corresponding `PATH` and `LD_LIBRARY_PATH` exports.

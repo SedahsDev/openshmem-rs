@@ -24,7 +24,7 @@ The mapping mirrors how `osss-ucx/src/shmemc/ucx/*` wires the same three C libra
 | `shmem_putmem` / `shmem_getmem` | `rma::putmem` / `rma::getmem` | UCX byte RMA |
 | `shmem_atomic_*` / fetch ops | `rma::atomic_*` | UCX `amo_*64` (+ `reply_buffer`) |
 | `shmem_fence` / `shmem_quiet` | `rma::fence()` / `rma::quiet()` | `ucp_ep_fence_nbx` / `ucp_ep_flush_nbx` |
-| `shmem_barrier*` / collectives | `coll::barrier` / `coll::*` | UCC team + collective builders |
+| `shmem_barrier*` / collectives | `coll::barrier` / `coll::*` and `coll::*_nb` | UCC team + collective builders |
 
 ## Conventions
 
@@ -48,6 +48,18 @@ framed heap rkey, and heap base, then performs `commit` and a PMIx `fence`
 before any peer `get`. Each peer address creates a UCX endpoint and its complete
 framed rkey is passed to `RemoteKey::unpack`; the framed bytes and base are also
 retained in `PeerRkeys`.
+
+### Non-blocking collectives
+
+The `_nb` APIs expose UCC's existing asynchronous request shape. They retain
+encoded buffers and return `CollectiveRequest`; `test()` polls without waiting
+and `wait()` repeatedly progresses UCC until completion. Typed broadcast and
+reduce copy completed bytes back into their borrowed destinations. `collect_nb`
+returns gathered values through `request.result::<T>()` after completion.
+
+The APIs are available only with `--features collectives`. A UCX tag-matching
+fallback for default builds is deliberately future work, rather than an
+emulated or silently blocking implementation.
 
 ## Symmetric addressing (`SymPtr`)
 
