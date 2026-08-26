@@ -15,6 +15,7 @@
 // the single narrow `SymHeap` Send implementation required by global state;
 // all other library code remains safe Rust.
 
+pub mod bootstrap;
 pub mod error;
 pub mod init;
 pub mod rma;

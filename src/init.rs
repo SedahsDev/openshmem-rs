@@ -13,13 +13,16 @@ use std::sync::{Mutex, OnceLock};
 
 use pmix::{get_value, PmixClient, RANK_WILDCARD};
 
+use crate::bootstrap::{handshake, PeerConnection};
 use crate::error::{Error, Result};
 use crate::rma::UcxTransport;
 use crate::symheap::SymHeap;
 
 struct ShmemState {
-    // Fields are dropped in declaration order. Keep the heap before transport
-    // so its UCX MemHandle is unmapped while the owning context is alive.
+    // Fields are dropped in declaration order. Drop peer UCX handles first,
+    // then the heap, and finally the transport that owns their worker/context.
+    #[allow(dead_code)]
+    peers: std::collections::BTreeMap<u32, PeerConnection>,
     #[allow(dead_code)]
     heap: SymHeap,
     #[allow(dead_code)]
@@ -27,6 +30,8 @@ struct ShmemState {
     client: PmixClient,
     rank: u32,
     size: usize,
+    #[allow(dead_code)]
+    peer_rkeys: crate::symheap::PeerRkeys,
 }
 
 static STATE: OnceLock<Mutex<Option<ShmemState>>> = OnceLock::new();
@@ -87,12 +92,23 @@ pub fn init() -> Result<()> {
         ));
     };
 
+    let bootstrap = match handshake(&client, &transport, &heap, size) {
+        Ok(bootstrap) => bootstrap,
+        Err(error) => {
+            let _ = client.disconnect(None);
+            return Err(error);
+        }
+    };
+
+    let crate::bootstrap::Bootstrap { peer_rkeys, peers } = bootstrap;
     *state = Some(ShmemState {
+        peers,
         heap,
         transport,
         client,
         rank,
         size,
+        peer_rkeys,
     });
     Ok(())
 }

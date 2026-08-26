@@ -104,6 +104,15 @@ impl UcxTransport {
     pub fn packed_address(&self) -> &[u8] {
         &self.packed_address
     }
+
+    pub(crate) fn create_endpoint(
+        &self,
+        address: &RemoteWorkerAddress,
+    ) -> std::result::Result<ep::Ep, Error> {
+        self.worker
+            .create_ep(ep::ParamsBuilder::new().address(address).build())
+            .map_err(Error::from)
+    }
 }
 
 #[cfg(test)]

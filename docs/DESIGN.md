@@ -42,6 +42,12 @@ The mapping mirrors how `osss-ucx/src/shmemc/ucx/*` wires the same three C libra
 4. `pmix::get_value` each peer PE → unpack rkey → `RemoteKey`, build per-PE endpoint.
 5. RMA/atomics now addressable on the peer's symmetric heap.
 
+`bootstrap::handshake` implements steps 3–4. It publishes the worker address,
+framed heap rkey, and heap base, then performs `commit` and a PMIx `fence`
+before any peer `get`. Each peer address creates a UCX endpoint and its complete
+framed rkey is passed to `RemoteKey::unpack`; the framed bytes and base are also
+retained in `PeerRkeys`.
+
 ## Symmetric addressing (`SymPtr`)
 
 Allocations from the symmetric heap are wrapped in a private `usize` ([`SymPtr`]
