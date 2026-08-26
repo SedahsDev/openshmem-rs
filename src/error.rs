@@ -19,6 +19,8 @@ pub enum Error {
     Usage(&'static str),
     /// The library is not initialized.
     NotInitialized,
+    /// The library has already been initialized.
+    AlreadyInitialized,
     /// A status that cannot represent an operation failure was returned as an error.
     Internal(&'static str),
 }
@@ -65,6 +67,7 @@ impl fmt::Display for Error {
             Self::Ucc(error) => write!(f, "ucc error: {error} (code {})", error.to_raw()),
             Self::Usage(message) => write!(f, "usage error: {message}"),
             Self::NotInitialized => write!(f, "openshmem not initialized"),
+            Self::AlreadyInitialized => write!(f, "openshmem already initialized"),
             Self::Internal(message) => write!(f, "internal error: {message}"),
         }
     }
