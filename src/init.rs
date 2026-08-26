@@ -13,6 +13,7 @@ use std::sync::{Mutex, OnceLock};
 
 use pmix::{get_value, PmixClient, RANK_WILDCARD};
 
+use crate::bootstrap::{handshake, PeerConnection};
 use crate::error::{Error, Result};
 use crate::rma::UcxTransport;
 use crate::symheap::SymHeap;
@@ -27,6 +28,10 @@ struct ShmemState {
     client: PmixClient,
     rank: u32,
     size: usize,
+    #[allow(dead_code)]
+    peer_rkeys: crate::symheap::PeerRkeys,
+    #[allow(dead_code)]
+    peers: std::collections::BTreeMap<u32, PeerConnection>,
 }
 
 static STATE: OnceLock<Mutex<Option<ShmemState>>> = OnceLock::new();
@@ -87,12 +92,23 @@ pub fn init() -> Result<()> {
         ));
     };
 
+    let bootstrap = match handshake(&client, &transport, &heap, size) {
+        Ok(bootstrap) => bootstrap,
+        Err(error) => {
+            let _ = client.disconnect(None);
+            return Err(error);
+        }
+    };
+
+    let crate::bootstrap::Bootstrap { peer_rkeys, peers } = bootstrap;
     *state = Some(ShmemState {
         heap,
         transport,
         client,
         rank,
         size,
+        peer_rkeys,
+        peers,
     });
     Ok(())
 }
