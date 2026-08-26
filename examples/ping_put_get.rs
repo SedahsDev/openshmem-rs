@@ -22,7 +22,7 @@ fn run() -> openshmem::error::Result<()> {
     }
 
     let buffer = init::malloc(std::mem::size_of::<u64>())?;
-    let offset = buffer.offset_from(init::heap_base()?);
+    let offset = buffer.offset_from(init::heap_base()?)?;
     if rank == 0 {
         rma::put(TARGET_PE, &[VALUE], offset + VALUE_OFFSET)?;
         rma::fence()?;
@@ -30,22 +30,17 @@ fn run() -> openshmem::error::Result<()> {
         println!("PE 0 put {VALUE:#x} to PE 1");
     } else {
         let deadline = Instant::now() + GET_TIMEOUT;
-        let received = loop {
-            let received = rma::get::<u64>(0, offset + VALUE_OFFSET, 1)?;
+        loop {
+            let received = rma::get::<u64>(rank, offset + VALUE_OFFSET, 1)?;
             if received.as_slice() == [VALUE] {
-                break received;
+                break;
             }
             if Instant::now() >= deadline {
                 return Err(openshmem::error::Error::Internal(
-                    "timed out waiting for PE 0's value",
+                    "timed out waiting for PE 1's value",
                 ));
             }
             std::thread::yield_now();
-        };
-        if received.as_slice() != [VALUE] {
-            return Err(openshmem::error::Error::Internal(
-                "PE 1 received an unexpected value",
-            ));
         }
         println!("PE 1 got and verified {VALUE:#x}");
     }

@@ -17,10 +17,9 @@ fn run() -> openshmem::error::Result<()> {
     let size = openshmem::init::n_pes()?;
     println!("PE {rank}/{size} entering barrier");
     let barrier_result = openshmem::coll::barrier();
-    let finalize_result = openshmem::init::finalize();
     barrier_result?;
-    finalize_result?;
     println!("PE {rank}/{size} passed barrier");
+    openshmem::init::finalize()?;
     Ok(())
 }
 

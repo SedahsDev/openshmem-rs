@@ -173,6 +173,7 @@ pub fn malloc(size: usize) -> Result<crate::symheap::SymPtr> {
         .malloc(size)
 }
 
+/// Return this process's symmetric heap base address.
 pub fn heap_base() -> Result<u64> {
     let state = lock_state()?;
     Ok(state
