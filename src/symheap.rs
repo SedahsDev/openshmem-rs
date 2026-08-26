@@ -1,87 +1,278 @@
-//! Symmetric heap: allocation/free and the PE→rkey map.
+//! Symmetric heap allocation, UCX registration, and per-PE rkeys.
 //!
-//! A symmetric allocation is represented by [`SymPtr`], a private `usize` (the
-//! allocation's address within the registered heap region) that converts into the
-//! UCX remote pointer (`u64`) for a target PE. It is deliberately NOT a raw
-//! `*mut u8`: on a remote PE the same virtual offset points at a different physical
-//! address, so application code must never dereference a `SymPtr` across PEs.
-//!
-//! Mirrors the OSSS-UCX `translate_address` / `get_remote_key_and_addr` flow: a
-//! local address (as `uint64_t`) is resolved to a `(remote u64 address, rkey)` pair
-//! for the target PE.
+//! The heap is one contiguous process-local region registered once with UCX. A
+//! small free-list allocator returns [`SymPtr`] values, which are deliberately
+//! not raw pointers: a symmetric pointer is an address-like private token whose
+//! offset is translated to a peer's heap base before an RMA operation.
 
-use crate::error::Result;
+use std::collections::BTreeMap;
 
-/// A symmetric-heap address. The inner `usize` is private to this crate.
-///
-/// Construct via [`SymAlloc::malloc`]; convert to a UCX remote address for a
-/// specific PE with [`SymPtr::to_remote_addr`].
+use ucx_sys::{context::Context, memh};
+
+use crate::{
+    error::{Error, Result},
+    rma::UcxTransport,
+};
+
+const DEFAULT_HEAP_SIZE: usize = 64 * 1024 * 1024;
+const ALIGNMENT: usize = 8;
+
+/// An address in the symmetric heap; application code cannot dereference it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SymPtr(pub(crate) usize);
 
 impl SymPtr {
-    /// Virtual offset of this allocation from the local heap base.
-    #[allow(dead_code)] // consumed by later RMA phases
+    /// Return the virtual offset from a local heap base.
+    #[allow(dead_code)]
     pub(crate) fn offset_from(self, local_base: u64) -> u64 {
         (self.0 as u64).wrapping_sub(local_base)
     }
 
-    /// The UCX remote pointer for a target PE, preserving the virtual offset:
-    /// `peer_base + (local_address - local_base)`, with wrapping arithmetic.
-    #[allow(dead_code)] // consumed by later RMA phases
+    /// Translate this allocation's offset to a target PE's heap address.
+    #[allow(dead_code)]
     pub(crate) fn to_remote_addr(self, local_base: u64, peer_base: u64) -> u64 {
         peer_base.wrapping_add(self.offset_from(local_base))
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::SymPtr;
+#[derive(Debug, Clone, Copy)]
+struct Block {
+    start: usize,
+    len: usize,
+}
 
-    #[test]
-    fn offset_is_the_same_for_symmetric_bases() {
-        let offset = 0x1234_u64;
-        let local = SymPtr((0x1000 + offset) as usize);
-        let peer = SymPtr((0x9000 + offset) as usize);
-        assert_eq!(local.offset_from(0x1000), peer.offset_from(0x9000));
+/// Heap base and packed rkey advertised by one PE.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PeerRkey {
+    pub heap_base: u64,
+    pub rkey: Vec<u8>,
+}
+
+/// Per-PE heap metadata, populated by the later PMIx exchange.
+#[derive(Debug, Default, Clone)]
+pub struct PeerRkeys(BTreeMap<u32, PeerRkey>);
+
+impl PeerRkeys {
+    /// Insert or replace a peer's heap metadata.
+    pub fn insert(&mut self, pe: u32, heap_base: u64, rkey: Vec<u8>) {
+        self.0.insert(pe, PeerRkey { heap_base, rkey });
     }
 
-    #[test]
-    fn remote_address_preserves_virtual_offset() {
-        let local_base = 0x1000_u64;
-        let address = 0x2234_u64;
-        let peer_base = 0x9000_u64;
-        let ptr = SymPtr(address as usize);
-        assert_eq!(
-            ptr.to_remote_addr(local_base, peer_base),
-            peer_base + (address - local_base)
-        );
-    }
-
-    #[test]
-    fn symmetric_peers_compute_consistent_remote_addresses() {
-        let heap_a = 0x1000_u64;
-        let heap_b = 0x9000_u64;
-        let offset = 0x1234_u64;
-        let address_a = SymPtr((heap_a + offset) as usize);
-        let address_b = SymPtr((heap_b + offset) as usize);
-
-        assert_eq!(address_a.to_remote_addr(heap_a, heap_b), heap_b + offset);
-        assert_eq!(address_b.to_remote_addr(heap_b, heap_a), heap_a + offset);
+    /// Look up a peer's heap metadata.
+    pub fn get(&self, pe: u32) -> Option<&PeerRkey> {
+        self.0.get(&pe)
     }
 }
 
-/// The symmetric-heap allocator, backed by a vendored pool registered with UCX.
-pub struct SymAlloc;
+/// A contiguous UCX-registered symmetric heap and its free-list allocator.
+pub struct SymHeap {
+    /// Declared first so UCX unmaps before the backing region is dropped.
+    #[allow(dead_code)]
+    memh: memh::MemHandle,
+    region: Vec<u64>,
+    free: Vec<Block>,
+    allocations: BTreeMap<usize, usize>,
+    packed_rkey: Vec<u8>,
+    local_base: u64,
+}
 
-impl SymAlloc {
-    /// Allocate `size` bytes in the symmetric heap (`shmem_malloc`).
-    pub fn malloc(_size: usize) -> Result<SymPtr> {
-        todo!("issue #4: vendored jemalloc pool + UCX registration")
+// UCX handles are accessed only while the lifecycle mutex is held.
+unsafe impl Send for SymHeap {}
+
+impl SymHeap {
+    /// Create, register, and rkey-pack a heap using the transport's UCX context.
+    pub fn new(transport: &UcxTransport) -> Result<Self> {
+        let size = std::env::var("SHMEM_SYMMETRIC_SIZE")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_HEAP_SIZE);
+        Self::with_size(transport.context(), size)
     }
 
-    /// Free a symmetric allocation (`shmem_free`).
-    pub fn free(_ptr: SymPtr) -> Result<()> {
-        todo!("issue #4: pool free")
+    /// Create a heap of exactly `size` bytes. Primarily useful for tests.
+    pub fn with_size(context: &Context, size: usize) -> Result<Self> {
+        if size < ALIGNMENT {
+            return Err(Error::Usage("symmetric heap is too small"));
+        }
+        let words = size
+            .checked_add(std::mem::size_of::<u64>() - 1)
+            .ok_or(Error::Usage("symmetric heap size overflow"))?
+            / std::mem::size_of::<u64>();
+        let capacity = words * std::mem::size_of::<u64>();
+        let mut region = vec![0_u64; words];
+        let local_base = region.as_mut_ptr() as u64;
+        let mut params = memh::MemMapParamsBuilder::new();
+        params
+            .address(region.as_mut_ptr() as *mut std::ffi::c_void)
+            .length(capacity);
+        let memh = memh::MemHandle::map(context, &mut params).map_err(Error::from)?;
+        let packed_rkey = memh::pack_rkey(context, &memh)
+            .map_err(Error::from)?
+            .as_bytes()
+            .to_vec();
+        Ok(Self {
+            memh,
+            region,
+            free: vec![Block {
+                start: 0,
+                len: capacity,
+            }],
+            allocations: BTreeMap::new(),
+            packed_rkey,
+            local_base,
+        })
+    }
+
+    /// Allocate at least `size` bytes, aligned to eight bytes.
+    pub fn malloc(&mut self, size: usize) -> Result<SymPtr> {
+        if size == 0 {
+            return Err(Error::Usage("symmetric allocation size must be nonzero"));
+        }
+        let requested = size
+            .checked_add(ALIGNMENT - 1)
+            .ok_or(Error::Usage("symmetric allocation size overflow"))?
+            & !(ALIGNMENT - 1);
+        let index = self
+            .free
+            .iter()
+            .position(|b| b.len >= requested)
+            .ok_or(Error::Usage("symmetric heap exhausted"))?;
+        let block = self.free[index];
+        let ptr = SymPtr(self.local_base as usize + block.start);
+        if block.len == requested {
+            self.free.remove(index);
+        } else {
+            self.free[index] = Block {
+                start: block.start + requested,
+                len: block.len - requested,
+            };
+        }
+        self.allocations.insert(ptr.0, requested);
+        Ok(ptr)
+    }
+
+    /// Return an allocation to the free list; double/foreign frees are errors.
+    pub fn free(&mut self, ptr: SymPtr) -> Result<()> {
+        let Some(len) = self.allocations.remove(&ptr.0) else {
+            return Err(Error::Usage("invalid symmetric pointer"));
+        };
+        let start = ptr
+            .0
+            .checked_sub(self.local_base as usize)
+            .ok_or(Error::Usage("invalid symmetric pointer"))?;
+        if start
+            .checked_add(len)
+            .filter(|&end| end <= self.region.len())
+            .is_none()
+            || start % ALIGNMENT != 0
+        {
+            return Err(Error::Usage("invalid symmetric pointer"));
+        }
+        self.free.push(Block { start, len });
+        self.free.sort_by_key(|b| b.start);
+        let mut merged: Vec<Block> = Vec::with_capacity(self.free.len());
+        for block in self.free.drain(..) {
+            if let Some(last) = merged.last_mut() {
+                if last.start + last.len == block.start {
+                    last.len += block.len;
+                    continue;
+                }
+            }
+            merged.push(block);
+        }
+        self.free = merged;
+        Ok(())
+    }
+
+    pub fn local_base(&self) -> u64 {
+        self.local_base
+    }
+    pub fn packed_rkey(&self) -> &[u8] {
+        &self.packed_rkey
+    }
+    pub fn capacity(&self) -> usize {
+        self.region.len() * std::mem::size_of::<u64>()
+    }
+}
+
+/// Thin handle for allocations from a stored symmetric heap.
+pub struct SymAlloc(std::sync::Mutex<SymHeap>);
+
+impl SymAlloc {
+    pub fn new(transport: &UcxTransport) -> Result<Self> {
+        Ok(Self(std::sync::Mutex::new(SymHeap::new(transport)?)))
+    }
+    pub fn malloc(&self, size: usize) -> Result<SymPtr> {
+        self.0
+            .lock()
+            .map_err(|_| Error::Internal("symmetric heap lock poisoned"))?
+            .malloc(size)
+    }
+    pub fn free(&self, ptr: SymPtr) -> Result<()> {
+        self.0
+            .lock()
+            .map_err(|_| Error::Internal("symmetric heap lock poisoned"))?
+            .free(ptr)
+    }
+    pub fn local_base(&self) -> Result<u64> {
+        Ok(self
+            .0
+            .lock()
+            .map_err(|_| Error::Internal("symmetric heap lock poisoned"))?
+            .local_base())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rma::UcxTransport;
+
+    #[test]
+    fn allocator_alignment_distinct_and_reuses_freed_space() {
+        let transport = UcxTransport::new(1).unwrap();
+        let mut heap = SymHeap::with_size(&transport.context(), 128).unwrap();
+        let a = heap.malloc(1).unwrap();
+        let b = heap.malloc(8).unwrap();
+        assert_eq!(a.0 % ALIGNMENT, 0);
+        assert_eq!(b.0 % ALIGNMENT, 0);
+        assert_ne!(a, b);
+        heap.free(a).unwrap();
+        assert_eq!(heap.malloc(8).unwrap(), a);
+    }
+
+    #[test]
+    fn registration_and_rkey_pack_succeed() {
+        let transport = UcxTransport::new(1).unwrap();
+        let heap = SymHeap::with_size(&transport.context(), 4096).unwrap();
+        assert_ne!(heap.local_base(), 0);
+        assert!(!heap.packed_rkey().is_empty());
+    }
+
+    #[test]
+    fn peer_rkeys_insert_and_update() {
+        let mut keys = PeerRkeys::default();
+        keys.insert(2, 9, vec![1]);
+        keys.insert(2, 10, vec![2]);
+        assert_eq!(keys.get(2).unwrap().heap_base, 10);
+        assert_eq!(keys.get(3), None);
+    }
+
+    #[test]
+    fn symmetric_address_translation_preserves_offset() {
+        let ptr = SymPtr(0x2234);
+        assert_eq!(ptr.to_remote_addr(0x1000, 0x9000), 0xa234);
+    }
+}
+
+#[cfg(test)]
+mod legacy_tests {
+    use super::SymPtr;
+    #[test]
+    fn symmetric_peers_compute_consistent_remote_addresses() {
+        let a = SymPtr(0x2234);
+        let b = SymPtr(0xa234);
+        assert_eq!(a.to_remote_addr(0x1000, 0x9000), 0xa234);
+        assert_eq!(b.to_remote_addr(0x9000, 0x1000), 0x2234);
     }
 }
