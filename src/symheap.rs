@@ -22,16 +22,23 @@ const ALIGNMENT: usize = 8;
 pub struct SymPtr(pub(crate) usize);
 
 impl SymPtr {
+    /// Return this allocation's byte offset from a symmetric heap base.
+    pub fn offset_from(self, local_base: u64) -> usize {
+        self.0
+            .checked_sub(local_base as usize)
+            .expect("pointer belongs to heap")
+    }
+
     /// Return the virtual offset from a local heap base.
     #[allow(dead_code)]
-    pub(crate) fn offset_from(self, local_base: u64) -> u64 {
-        (self.0 as u64).wrapping_sub(local_base)
+    pub(crate) fn offset_from_u64(self, local_base: u64) -> u64 {
+        self.offset_from(local_base) as u64
     }
 
     /// Translate this allocation's offset to a target PE's heap address.
     #[allow(dead_code)]
     pub(crate) fn to_remote_addr(self, local_base: u64, peer_base: u64) -> u64 {
-        peer_base.wrapping_add(self.offset_from(local_base))
+        peer_base.wrapping_add(self.offset_from_u64(local_base))
     }
 }
 
