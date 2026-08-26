@@ -11,6 +11,9 @@
 //!
 //! Phase 1 provides a contiguous UCX-registered symmetric heap and address-only
 //! allocation tokens; the phased implementation roadmap lives in the issue tracker.
+// The crate-level `forbid(unsafe_code)` policy is intentionally relaxed for
+// the single narrow `SymHeap` Send implementation required by global state;
+// all other library code remains safe Rust.
 
 pub mod error;
 pub mod init;

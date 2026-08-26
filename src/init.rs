@@ -18,12 +18,12 @@ use crate::rma::UcxTransport;
 use crate::symheap::SymHeap;
 
 struct ShmemState {
-    #[allow(dead_code)]
-    transport: UcxTransport,
-    // Declared after transport: fields drop in reverse declaration order, so
-    // the heap registration is released before the UCX context.
+    // Fields are dropped in declaration order. Keep the heap before transport
+    // so its UCX MemHandle is unmapped while the owning context is alive.
     #[allow(dead_code)]
     heap: SymHeap,
+    #[allow(dead_code)]
+    transport: UcxTransport,
     client: PmixClient,
     rank: u32,
     size: usize,

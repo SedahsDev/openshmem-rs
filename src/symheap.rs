@@ -76,7 +76,13 @@ pub struct SymHeap {
     local_base: u64,
 }
 
-// UCX handles are accessed only while the lifecycle mutex is held.
+// SAFETY: After construction, the MemHandle is dormant until Drop; malloc and
+// free operate only on the Rust allocator metadata and never touch it. The
+// owning UCX Context is unsafe impl Send + Sync in ucx-rs (context.rs:273-280),
+// and the Context outlives this MemHandle because ShmemState declares heap
+// before transport. Send is required because the process-global
+// OnceLock<Mutex<Option<ShmemState>>> requires ShmemState: Send. There is no
+// unsafe-free alternative that preserves the symmetric-heap semantics.
 unsafe impl Send for SymHeap {}
 
 impl SymHeap {
@@ -162,7 +168,7 @@ impl SymHeap {
             .ok_or(Error::Usage("invalid symmetric pointer"))?;
         if start
             .checked_add(len)
-            .filter(|&end| end <= self.region.len())
+            .filter(|&end| end <= self.region.len() * std::mem::size_of::<u64>())
             .is_none()
             || start % ALIGNMENT != 0
         {
@@ -239,6 +245,17 @@ mod tests {
         assert_ne!(a, b);
         heap.free(a).unwrap();
         assert_eq!(heap.malloc(8).unwrap(), a);
+    }
+
+    #[test]
+    fn frees_allocation_at_end_of_multimegabyte_heap() {
+        let transport = UcxTransport::new(1).unwrap();
+        let mut heap = SymHeap::with_size(&transport.context(), 2 * 1024 * 1024).unwrap();
+        let capacity = heap.capacity();
+        let _prefix = heap.malloc(capacity - ALIGNMENT).unwrap();
+        let tail = heap.malloc(ALIGNMENT).unwrap();
+        assert_eq!(tail.0 - heap.local_base() as usize, capacity - ALIGNMENT);
+        heap.free(tail).unwrap();
     }
 
     #[test]
