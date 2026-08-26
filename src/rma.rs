@@ -228,10 +228,14 @@ pub trait Pod: Copy + Sized {
     const SIZE: usize;
     fn encode(self, dst: &mut Vec<u8>);
     fn decode(src: &[u8]) -> Result<Self>;
+    #[cfg(feature = "collectives")]
+    fn ucc_datatype() -> ucc::collective::DataType;
+    #[cfg(feature = "collectives")]
+    fn reduction_supported(op: ucc::collective::UccReductionOp) -> bool;
 }
 
 macro_rules! pod_types {
-    ($($ty:ty => $size:expr),+ $(,)?) => {$ (
+    ($($ty:ty => $size:expr => $ucc:expr => $reduce:expr),+ $(,)?) => {$ (
         impl Pod for $ty {
             const SIZE: usize = $size;
             fn encode(self, dst: &mut Vec<u8>) { dst.extend_from_slice(&self.to_ne_bytes()); }
@@ -239,12 +243,26 @@ macro_rules! pod_types {
                 let bytes: [u8; $size] = src.try_into().map_err(|_| Error::Internal("invalid typed RMA byte count"))?;
                 Ok(<$ty>::from_ne_bytes(bytes))
             }
+            #[cfg(feature = "collectives")]
+            fn ucc_datatype() -> ucc::collective::DataType { $ucc }
+            #[cfg(feature = "collectives")]
+            fn reduction_supported(op: ucc::collective::UccReductionOp) -> bool { $reduce(op) }
         }
     )+ };
 }
 
-pod_types!(u8 => 1, i8 => 1, u16 => 2, i16 => 2, u32 => 4, i32 => 4,
-           u64 => 8, i64 => 8, f32 => 4, f64 => 8);
+pod_types!(
+    u8 => 1 => ucc::collective::DataType::Uint8 => |op| matches!(op, ucc::collective::UccReductionOp::Sum | ucc::collective::UccReductionOp::Min | ucc::collective::UccReductionOp::Max | ucc::collective::UccReductionOp::Band | ucc::collective::UccReductionOp::Bor | ucc::collective::UccReductionOp::Bxor),
+    i8 => 1 => ucc::collective::DataType::Int8 => |op| matches!(op, ucc::collective::UccReductionOp::Sum | ucc::collective::UccReductionOp::Min | ucc::collective::UccReductionOp::Max | ucc::collective::UccReductionOp::Band | ucc::collective::UccReductionOp::Bor | ucc::collective::UccReductionOp::Bxor),
+    u16 => 2 => ucc::collective::DataType::Uint16 => |op| matches!(op, ucc::collective::UccReductionOp::Sum | ucc::collective::UccReductionOp::Min | ucc::collective::UccReductionOp::Max | ucc::collective::UccReductionOp::Band | ucc::collective::UccReductionOp::Bor | ucc::collective::UccReductionOp::Bxor),
+    i16 => 2 => ucc::collective::DataType::Int16 => |op| matches!(op, ucc::collective::UccReductionOp::Sum | ucc::collective::UccReductionOp::Min | ucc::collective::UccReductionOp::Max | ucc::collective::UccReductionOp::Band | ucc::collective::UccReductionOp::Bor | ucc::collective::UccReductionOp::Bxor),
+    u32 => 4 => ucc::collective::DataType::Uint32 => |op| matches!(op, ucc::collective::UccReductionOp::Sum | ucc::collective::UccReductionOp::Min | ucc::collective::UccReductionOp::Max | ucc::collective::UccReductionOp::Band | ucc::collective::UccReductionOp::Bor | ucc::collective::UccReductionOp::Bxor),
+    i32 => 4 => ucc::collective::DataType::Int32 => |op| matches!(op, ucc::collective::UccReductionOp::Sum | ucc::collective::UccReductionOp::Min | ucc::collective::UccReductionOp::Max | ucc::collective::UccReductionOp::Band | ucc::collective::UccReductionOp::Bor | ucc::collective::UccReductionOp::Bxor),
+    u64 => 8 => ucc::collective::DataType::Uint64 => |op| matches!(op, ucc::collective::UccReductionOp::Sum | ucc::collective::UccReductionOp::Min | ucc::collective::UccReductionOp::Max | ucc::collective::UccReductionOp::Band | ucc::collective::UccReductionOp::Bor | ucc::collective::UccReductionOp::Bxor),
+    i64 => 8 => ucc::collective::DataType::Int64 => |op| matches!(op, ucc::collective::UccReductionOp::Sum | ucc::collective::UccReductionOp::Min | ucc::collective::UccReductionOp::Max | ucc::collective::UccReductionOp::Band | ucc::collective::UccReductionOp::Bor | ucc::collective::UccReductionOp::Bxor),
+    f32 => 4 => ucc::collective::DataType::Float32 => |op| matches!(op, ucc::collective::UccReductionOp::Sum | ucc::collective::UccReductionOp::Min | ucc::collective::UccReductionOp::Max),
+    f64 => 8 => ucc::collective::DataType::Float64 => |op| matches!(op, ucc::collective::UccReductionOp::Sum | ucc::collective::UccReductionOp::Min | ucc::collective::UccReductionOp::Max),
+);
 
 fn peer_and_address(
     state: &crate::init::ShmemState,

@@ -16,6 +16,8 @@
 // all other library code remains safe Rust.
 
 pub mod bootstrap;
+#[cfg(feature = "collectives")]
+pub mod coll;
 pub mod error;
 pub mod init;
 pub mod rma;

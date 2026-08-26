@@ -27,6 +27,8 @@ pub(crate) struct ShmemState {
     heap: SymHeap,
     #[allow(dead_code)]
     pub(crate) transport: UcxTransport,
+    #[cfg(feature = "collectives")]
+    pub(crate) collectives: Option<crate::coll::Runtime>,
     client: PmixClient,
     rank: u32,
     size: usize,
@@ -114,11 +116,34 @@ pub fn init() -> Result<()> {
         peers,
         heap,
         transport,
+        #[cfg(feature = "collectives")]
+        collectives: None,
         client,
         rank,
         size,
         peer_rkeys,
     });
+    #[cfg(feature = "collectives")]
+    {
+        let client = state
+            .as_ref()
+            .expect("state was just installed")
+            .client
+            .clone();
+        let runtime = match crate::coll::Runtime::new(client, rank, size) {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                if let Some(failed_state) = state.take() {
+                    let _ = failed_state.client.disconnect(None);
+                }
+                return Err(error);
+            }
+        };
+        state
+            .as_mut()
+            .expect("state was just installed")
+            .collectives = Some(runtime);
+    }
     Ok(())
 }
 
