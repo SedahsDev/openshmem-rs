@@ -54,7 +54,7 @@ impl UcxTransport {
     /// serialized by its binding-level mutex so this handle can be retained in
     /// the process-global lifecycle state.
     pub fn new(estimated_num_eps: usize) -> Result<Self> {
-        let features = context::Flags::Tag;
+        let features = context::Flags::Tag | context::Flags::Rma;
         let mut params_builder = context::ParamsBuilder::new();
         params_builder
             .features(features)
@@ -115,10 +115,18 @@ impl UcxTransport {
             .map_err(Error::from)
     }
 
+    /// Wait for a request until UCX reports completion.
+    ///
+    /// The binding's helper has a fixed one-million-round budget. RMA
+    /// operations can legitimately need more progress rounds for large
+    /// transfers, so this wrapper retries that helper while it reports an
+    /// incomplete request instead of treating the budget as a timeout.
     pub(crate) fn wait_request(&self, request: &Request) -> Result<()> {
-        match self.worker.wait_request(request).map_err(Error::from)? {
-            true => Ok(()),
-            false => Err(Error::Internal("UCX request completion timed out")),
+        loop {
+            match self.worker.wait_request(request).map_err(Error::from)? {
+                true => return Ok(()),
+                false => continue,
+            }
         }
     }
 }
@@ -136,9 +144,37 @@ mod tests {
     }
 
     #[test]
-    fn creates_a_self_addressed_endpoint() {
+    fn loopback_rma_put_get_roundtrip_uses_real_completion_path() {
+        use ucx_sys::rma::RemoteKey;
+
         let transport = UcxTransport::new(1).expect("UCX RMA context and worker");
-        let _endpoint = transport.loopback_endpoint().expect("self endpoint");
+        let mut target = vec![0_u8; 4096];
+        let memh = ucx_sys::memh::MemHandle::map_slice(transport.context(), &mut target, 0)
+            .expect("registered heap");
+        let packed_rkey = ucx_sys::rma::RemoteKey::pack(transport.context(), memh.mem_handle())
+            .expect("pack heap rkey");
+        let endpoint = transport.loopback_endpoint().expect("self endpoint");
+        let rkey = RemoteKey::unpack(&endpoint, &packed_rkey).expect("own framed rkey");
+        let params = RequestParamBuilder::new().no_imm_cmpl().build();
+        let source = b"loopback RMA";
+        let mut destination = vec![0_u8; source.len()];
+
+        if let Some(request) = endpoint
+            .rma_put(source, target.as_mut_ptr() as u64, &rkey, &params)
+            .expect("loopback put")
+        {
+            transport.wait_request(&request).expect("put completion");
+            request.free();
+        }
+        if let Some(request) = endpoint
+            .rma_get(&mut destination, target.as_mut_ptr() as u64, &rkey, &params)
+            .expect("loopback get")
+        {
+            transport.wait_request(&request).expect("get completion");
+            request.free();
+        }
+
+        assert_eq!(destination, source);
     }
 }
 
