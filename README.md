@@ -5,18 +5,19 @@ An OpenSHMEM-style PGAS library for Rust, built on the SedahsDev `pmix-rs`,
 
 ## Native libraries
 
-The crate requires native PMIx >= 6.1 and UCX. Set `PMIX_PREFIX` to the PMIx
-installation and make UCX discoverable through `pkg-config` (or the binding's
-normal build configuration). For the reference environment:
+The crate requires native PMIx (>= 5.0 for the base API) and UCX. Set
+`PMIX_PREFIX` to the PMIx installation, or leave it unset to use `pkg-config`,
+and make UCX discoverable through `pkg-config` (or the binding's normal build
+configuration). For a custom PMIx installation:
 
 ```bash
-export PMIX_PREFIX=/home/bzf/pmix-env/openpmix-6.1.0
-export LD_LIBRARY_PATH=/home/bzf/pmix-env/openpmix-6.1.0/lib:/home/bzf/pmix-env/deps/libevent-2.1.12-stable/lib:/home/bzf/pmix-env/deps/hwloc-2.9.2/lib
+export PMIX_PREFIX=/path/to/openpmix
+export LD_LIBRARY_PATH="$PMIX_PREFIX/lib:${LD_LIBRARY_PATH:-}"
 ```
 
 Collectives are optional: enable `--features collectives` when UCC 1.8.0 is
-installed and set `UCC_INCLUDE_DIR` and `UCC_LIB_DIR` (the reference prefix is
-`/home/bzf`). The `ucc` dependency is feature-gated because there is no system
+installed and set `UCC_INCLUDE_DIR` and `UCC_LIB_DIR` (or set `UCC_PREFIX`). The
+`ucc` dependency is feature-gated because there is no system
 `pkg-config` UCC entry.
 
 The CI checks compile and test the library without requiring a PMIx DVM or

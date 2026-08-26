@@ -22,15 +22,15 @@ pub struct SymPtr(pub(crate) usize);
 impl SymPtr {
     /// Virtual offset of this allocation from the local heap base.
     #[allow(dead_code)] // consumed by later RMA phases
-    pub(crate) fn offset_from(self, heap_base: u64) -> u64 {
-        (self.0 as u64).wrapping_sub(heap_base)
+    pub(crate) fn offset_from(self, local_base: u64) -> u64 {
+        (self.0 as u64).wrapping_sub(local_base)
     }
 
-    /// The UCX remote pointer for a target PE: peer heap base + this allocation's
-    /// virtual offset. Symmetric addressing means every PE computes the same value.
+    /// The UCX remote pointer for a target PE, preserving the virtual offset:
+    /// `peer_base + (local_address - local_base)`, with wrapping arithmetic.
     #[allow(dead_code)] // consumed by later RMA phases
-    pub(crate) fn to_remote_addr(self, peer_base: u64) -> u64 {
-        peer_base.wrapping_add(self.0 as u64)
+    pub(crate) fn to_remote_addr(self, local_base: u64, peer_base: u64) -> u64 {
+        peer_base.wrapping_add(self.offset_from(local_base))
     }
 }
 
@@ -48,8 +48,26 @@ mod tests {
 
     #[test]
     fn remote_address_preserves_virtual_offset() {
-        let ptr = SymPtr(0x1234);
-        assert_eq!(ptr.to_remote_addr(0x9000), 0x9000 + 0x1234);
+        let local_base = 0x1000_u64;
+        let address = 0x2234_u64;
+        let peer_base = 0x9000_u64;
+        let ptr = SymPtr(address as usize);
+        assert_eq!(
+            ptr.to_remote_addr(local_base, peer_base),
+            peer_base + (address - local_base)
+        );
+    }
+
+    #[test]
+    fn symmetric_peers_compute_consistent_remote_addresses() {
+        let heap_a = 0x1000_u64;
+        let heap_b = 0x9000_u64;
+        let offset = 0x1234_u64;
+        let address_a = SymPtr((heap_a + offset) as usize);
+        let address_b = SymPtr((heap_b + offset) as usize);
+
+        assert_eq!(address_a.to_remote_addr(heap_a, heap_b), heap_b + offset);
+        assert_eq!(address_b.to_remote_addr(heap_b, heap_a), heap_a + offset);
     }
 }
 

@@ -4,20 +4,23 @@ on:
   push:
   pull_request:
 
-env:
-  PMIX_PREFIX: /home/bzf/pmix-env/openpmix-6.1.0
-  LD_LIBRARY_PATH: /home/bzf/pmix-env/openpmix-6.1.0/lib:/home/bzf/pmix-env/deps/libevent-2.1.12-stable/lib:/home/bzf/pmix-env/deps/hwloc-2.9.2/lib
-
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install native dependencies
+        run: sudo apt-get update && sudo apt-get install -y libpmix-dev libucx-dev libclang-dev clang pkg-config
+      - name: Check out path dependencies
+        run: |
+          git clone --depth 1 https://github.com/SedahsDev/pmix-rs.git ../pmix-rs
+          git clone --depth 1 https://github.com/SedahsDev/ucx-rs.git ../ucx-rs
+          git clone --depth 1 https://github.com/SedahsDev/ucc-rs.git ../ucc-rs
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo check --lib
-      - run: mkdir -p /tmp/emptyinc && cargo check --lib --features collectives
-        env:
-          UCC_INCLUDE_DIR: /tmp/emptyinc
-          UCC_LIB_DIR: /home/bzf/lib
       - run: cargo clippy --lib -- -D warnings
       - run: cargo test --tests
+
+      # Hosted runners do not provide UCC. Collectives are verified locally
+      # with an installed UCC development package instead of pretending this
+      # job exercises that feature.
