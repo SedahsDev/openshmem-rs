@@ -29,4 +29,4 @@ The CI checks compile and test the library without requiring a PMIx DVM or
 daemon. DVM-backed integration tests require a PRRTE installation and its
 corresponding `PATH` and `LD_LIBRARY_PATH` exports.
 
-See [docs/DESIGN.md](docs/DESIGN.md) for architecture and the implementation roadmap.
+See [docs/DESIGN.md](docs/DESIGN.md) for architecture and the implementation roadmap. For the manual multi-PE procedure on RDMA-capable hardware, see [docs/RDMA-RUNNING.md](docs/RDMA-RUNNING.md).
