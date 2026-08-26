@@ -7,7 +7,7 @@ use crate::{
     error::{Error, Result},
     rma::Pod,
 };
-use pmix::{PmixScope, get_value, put_value};
+use pmix::{get_value, put_value, PmixScope};
 use std::{ffi::c_void, ptr};
 use ucc::{
     bindings::{ucc_oob_coll_t, ucc_status_t_UCC_ERR_NO_MESSAGE, ucc_status_t_UCC_OK},
@@ -48,7 +48,7 @@ unsafe extern "C" fn allgather(
             .ok()?
             .build()
             .ok()?;
-        put_value(PmixScope::Local.to_raw(), key, &mut value).ok()?;
+        put_value(PmixScope::Global.to_raw(), key, &mut value).ok()?;
         pmix::commit().ok()?;
         let wildcard = state.client.proc_with_nspace(pmix::RANK_WILDCARD).ok()?;
         pmix::fence(&wildcard, None).ok()?;
@@ -93,6 +93,8 @@ pub(crate) struct Runtime {
     _lib: UccLib,
     _oob: Box<OobState>,
 }
+// SAFETY: Every collective operation enters `with_state`, which holds the
+// lifecycle mutex for the entire operation and therefore serializes UCC ops.
 unsafe impl Send for Runtime {}
 
 impl Runtime {
@@ -125,7 +127,7 @@ fn ucc_oob(oob: &OobState, rank: u32, size: u32) -> ucc_oob_coll_t {
     }
 }
 fn map_ucc(status: ucc::UccStatus) -> Error {
-    Error::Ucc(status.known().unwrap_or(ucc::UccError::ErrLast))
+    Error::Ucc(status)
 }
 fn wait(context: &UccContext, mut op: UccCollective) -> Result<()> {
     loop {
@@ -187,6 +189,9 @@ pub fn barrier() -> Result<()> {
 }
 /// Broadcast a typed buffer from `root`.
 pub fn broadcast<T: Pod>(root: usize, values: &mut [T]) -> Result<()> {
+    if values.is_empty() {
+        return Err(Error::Usage("collective buffer must be non-empty"));
+    }
     let mut bytes = encode(values)?;
     crate::init::with_state(|state| {
         let runtime = state
@@ -241,7 +246,11 @@ pub fn collect<T: Pod>(values: &[T]) -> Result<Vec<T>> {
             .map(|parts| parts.into_iter().flatten().collect())
     })
 }
-/// Allreduce in place using the OpenSHMEM-compatible reduction set.
+/// Allreduce in place using the supported subset of OpenSHMEM reductions.
+///
+/// The logical product and boolean reductions (`Prod`, `Land`, `Lor`, and
+/// `Lxor`) are not currently exposed; integer bitwise reductions are supported
+/// where applicable.
 pub fn reduce<T: Pod>(op: UccReductionOp, values: &mut [T]) -> Result<()> {
     if !T::reduction_supported(op) {
         return Err(Error::Usage(
@@ -276,6 +285,12 @@ mod tests {
         let _: fn(usize, &mut [u8]) -> Result<()> = broadcast;
         let _: fn(&[u8]) -> Result<Vec<u8>> = collect;
         let _: fn(UccReductionOp, &mut [u8]) -> Result<()> = reduce;
+    }
+
+    #[test]
+    fn unknown_ucc_status_preserves_raw_code() {
+        let error = map_ucc(ucc::UccStatus::Unknown(-777));
+        assert!(matches!(error, Error::Ucc(ucc::UccStatus::Unknown(-777))));
     }
     #[test]
     #[ignore = "requires DVM + UCC"]

@@ -14,7 +14,7 @@ pub enum Error {
     Ucx(ucs_status_t),
     /// An error surfaced from the UCC collective layer.
     #[cfg(feature = "collectives")]
-    Ucc(ucc::UccError),
+    Ucc(ucc::UccStatus),
     /// A programming error local to this crate.
     Usage(&'static str),
     /// The library is not initialized.
@@ -51,7 +51,7 @@ impl From<ucs_status_t> for Error {
 impl From<ucc::UccError> for Error {
     fn from(error: ucc::UccError) -> Self {
         if error.is_error() {
-            Self::Ucc(error)
+            Self::Ucc(error.into())
         } else {
             Self::Internal("UCC informational status was returned where an error was expected")
         }
@@ -100,7 +100,10 @@ mod tests {
     #[test]
     fn ucc_error_converts_only_failures() {
         let error = Error::from(ucc::UccError::ErrInvalidParam);
-        assert!(matches!(error, Error::Ucc(ucc::UccError::ErrInvalidParam)));
+        assert!(matches!(
+            error,
+            Error::Ucc(ucc::UccStatus::Known(ucc::UccError::ErrInvalidParam))
+        ));
         assert!(matches!(
             Error::from(ucc::UccError::InProgress),
             Error::Internal(_)
