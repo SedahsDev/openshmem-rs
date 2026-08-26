@@ -15,8 +15,13 @@ use pmix::{get_value, PmixClient, RANK_WILDCARD};
 
 use crate::error::{Error, Result};
 use crate::rma::UcxTransport;
+use crate::symheap::SymHeap;
 
 struct ShmemState {
+    // Fields are dropped in declaration order. Keep the heap before transport
+    // so its UCX MemHandle is unmapped while the owning context is alive.
+    #[allow(dead_code)]
+    heap: SymHeap,
     #[allow(dead_code)]
     transport: UcxTransport,
     client: PmixClient,
@@ -57,6 +62,13 @@ pub fn init() -> Result<()> {
             return Err(error);
         }
     };
+    let heap = match SymHeap::new(&transport) {
+        Ok(heap) => heap,
+        Err(error) => {
+            let _ = client.disconnect(None);
+            return Err(error);
+        }
+    };
     let size = (|| {
         let wildcard = client.proc_with_nspace(RANK_WILDCARD).ok()?;
         get_value(&wildcard, pmix::JOB_SIZE, None)
@@ -76,6 +88,7 @@ pub fn init() -> Result<()> {
     };
 
     *state = Some(ShmemState {
+        heap,
         transport,
         client,
         rank,

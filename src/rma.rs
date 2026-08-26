@@ -41,6 +41,11 @@ pub struct UcxTransport {
 }
 
 impl UcxTransport {
+    /// Borrow the UCX context for registration and key packing.
+    pub(crate) fn context(&self) -> &context::Context {
+        &self.context
+    }
+
     /// Create a context requesting RMA and exported-memory-handle support.
     ///
     /// Context creation is the capability gate: UCX returns an error when no
