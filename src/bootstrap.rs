@@ -11,15 +11,9 @@ use crate::{
     symheap::{PeerRkeys, SymHeap},
 };
 
-#[allow(clippy::manual_c_str_literals)]
-pub static WORKER_ADDR_KEY: &CStr =
-    unsafe { CStr::from_bytes_with_nul_unchecked(b"shmem.worker.addr\0") };
-#[allow(clippy::manual_c_str_literals)]
-pub static HEAP_RKEY_KEY: &CStr =
-    unsafe { CStr::from_bytes_with_nul_unchecked(b"shmem.heap.rkey\0") };
-#[allow(clippy::manual_c_str_literals)]
-pub static HEAP_BASE_KEY: &CStr =
-    unsafe { CStr::from_bytes_with_nul_unchecked(b"shmem.heap.base\0") };
+pub static WORKER_ADDR_KEY: &CStr = c"shmem.worker.addr";
+pub static HEAP_RKEY_KEY: &CStr = c"shmem.heap.rkey";
+pub static HEAP_BASE_KEY: &CStr = c"shmem.heap.base";
 
 const WORKER_ADDR_GET_KEY: &[u8] = b"shmem.worker.addr\0";
 const HEAP_RKEY_GET_KEY: &[u8] = b"shmem.heap.rkey\0";
@@ -33,7 +27,18 @@ pub struct PeerConnection {
     pub heap_base: u64,
 }
 
-// Endpoint handles are owned behind the process-global lifecycle mutex.
+// SAFETY: `Ep` and `RemoteKey` contain raw UCX handles and are intentionally
+// `!Send`. A `PeerConnection` is constructed only by `handshake` and is kept
+// in the private `ShmemState`; every access to that state, including the
+// eventual drop of these handles, is serialized by `STATE`. `ShmemState`
+// declares peers before the heap and transport, so endpoints and rkeys are
+// destroyed while their UCX worker/context are still alive; the heap then
+// unmaps while the context remains alive. No handle is moved or accessed
+// concurrently with another thread while live. `Send` is required because
+// the process-global `OnceLock<Mutex<Option<ShmemState>>>` owns the state and
+// may move it between the initializing and finalizing threads. There is no
+// safe alternative that preserves ownership of these opaque UCX handles and
+// the OpenSHMEM process-global lifecycle.
 unsafe impl Send for PeerConnection {}
 
 pub struct Bootstrap {
@@ -72,8 +77,10 @@ pub fn handshake(
         .map_err(|_| Error::Usage("failed to build heap base value"))?;
     put_value(PmixScope::Global.to_raw(), HEAP_BASE_KEY, &mut base).map_err(pmix_error)?;
     pmix::commit().map_err(pmix_error)?;
-    let proc = client.proc().ok_or(Error::NotInitialized)?;
-    pmix::fence(&proc, None).map_err(pmix_error)?;
+    let wildcard = client
+        .proc_with_nspace(pmix::RANK_WILDCARD)
+        .map_err(Error::from)?;
+    pmix::fence(&wildcard, None).map_err(pmix_error)?;
 
     let mut peer_rkeys = PeerRkeys::default();
     let mut peers = BTreeMap::new();

@@ -1,7 +1,7 @@
 [package]
 name = "openshmem"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 rust-version = "1.85"
 description = "OpenSHMEM-style partitioned global address space (PGAS) library for Rust, built on pmix-rs (bootstrap) + ucx-rs (RMA/atomics) + ucc-rs (collectives)."
 license = "MIT"
