@@ -16,6 +16,7 @@
 use ucx_sys::context;
 use ucx_sys::context::Context;
 use ucx_sys::ep;
+use ucx_sys::ucs_thread_mode_t;
 use ucx_sys::worker::{MtWorker, RemoteWorkerAddress};
 
 use crate::error::{Error, Result};
@@ -32,9 +33,9 @@ pub struct TransportCapabilities {
 /// An owned UCX context and thread-safe worker for one OpenSHMEM PE.
 #[derive(Debug)]
 pub struct UcxTransport {
+    worker: MtWorker,
     #[allow(dead_code)]
     context: Context,
-    worker: MtWorker,
     packed_address: Vec<u8>,
     capabilities: TransportCapabilities,
 }
@@ -49,8 +50,10 @@ impl UcxTransport {
     pub fn new(estimated_num_eps: usize) -> Result<Self> {
         let features = context::Flags::Tag;
         let mut params_builder = context::ParamsBuilder::new();
-        params_builder.features(features).mt_workers_shared(1);
-        let _ = estimated_num_eps;
+        params_builder
+            .features(features)
+            .mt_workers_shared(1)
+            .estimated_num_eps(estimated_num_eps);
         let params = params_builder.build();
         let config = context::Config::read("", "").map_err(|error| match error {
             context::ConfigError::Ucs(status) => Error::from(status),
@@ -59,7 +62,9 @@ impl UcxTransport {
         let mut context = Context::new(&config, &params).map_err(Error::from)?;
         drop(config);
 
-        let worker_params = ucx_sys::worker::ParamsBuilder::new().build();
+        let worker_params = ucx_sys::worker::ParamsBuilder::new()
+            .thread_mode(ucs_thread_mode_t::UCS_THREAD_MODE_SERIALIZED)
+            .build();
         let worker = context.worker_create(&worker_params).map_err(Error::from)?;
         let packed_address = worker.pack_address().map_err(Error::from)?.to_vec();
         let worker = MtWorker::new(worker).map_err(Error::from)?;
