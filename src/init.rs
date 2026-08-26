@@ -14,8 +14,11 @@ use std::sync::{Mutex, OnceLock};
 use pmix::{get_value, PmixClient, RANK_WILDCARD};
 
 use crate::error::{Error, Result};
+use crate::rma::UcxTransport;
 
 struct ShmemState {
+    #[allow(dead_code)]
+    transport: UcxTransport,
     client: PmixClient,
     rank: u32,
     size: usize,
@@ -47,6 +50,13 @@ pub fn init() -> Result<()> {
 
     let client = PmixClient::connect_new(None).map_err(Error::from)?;
     let rank = client.require_rank();
+    let transport = match UcxTransport::new(1) {
+        Ok(transport) => transport,
+        Err(error) => {
+            let _ = client.disconnect(None);
+            return Err(error);
+        }
+    };
     let size = (|| {
         let wildcard = client.proc_with_nspace(RANK_WILDCARD).ok()?;
         get_value(&wildcard, pmix::JOB_SIZE, None)
@@ -65,7 +75,12 @@ pub fn init() -> Result<()> {
         ));
     };
 
-    *state = Some(ShmemState { client, rank, size });
+    *state = Some(ShmemState {
+        transport,
+        client,
+        rank,
+        size,
+    });
     Ok(())
 }
 
