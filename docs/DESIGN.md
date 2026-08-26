@@ -50,9 +50,9 @@ offset maps to different physical addresses on different PEs. The mapping follow
 OSSS-UCX's `comms.c` `translate_address` / `get_remote_key_and_addr` flow:
 
 - `SymPtr::offset_from(local_heap_base) -> u64` — the allocation's virtual offset.
-- `SymPtr::to_remote_addr(peer_heap_base) -> u64` — the UCX remote pointer for a
-  target PE; symmetric addressing means every PE computes the same value for the
-  same virtual offset.
+- `SymPtr::to_remote_addr(local_heap_base, peer_heap_base) -> u64` — the UCX
+  remote pointer for a target PE, computed as `peer_heap_base + (local_address -
+  local_heap_base)` so every PE preserves the same virtual offset.
 - `rma::put/get` pass this `u64` plus the peer's unpacked `RemoteKey` to UCX.
 
 Application code cannot build a `SymPtr` from a raw pointer; only `SymAlloc`

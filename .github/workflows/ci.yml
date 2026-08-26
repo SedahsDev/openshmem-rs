@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native dependencies
+        run: sudo apt-get update && sudo apt-get install -y libpmix-dev libucx-dev libclang-dev clang pkg-config
+      - name: Check out path dependencies
+        run: |
+          git clone --depth 1 https://github.com/SedahsDev/pmix-rs.git ../pmix-rs
+          git clone --depth 1 https://github.com/SedahsDev/ucx-rs.git ../ucx-rs
+          git clone --depth 1 https://github.com/SedahsDev/ucc-rs.git ../ucc-rs
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo check --lib
+      - run: cargo clippy --lib -- -D warnings
+      - run: cargo test --tests
+
+      # Hosted runners do not provide UCC. Collectives are verified locally
+      # with an installed UCC development package instead of pretending this
+      # job exercises that feature.

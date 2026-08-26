@@ -1,47 +1,27 @@
 # openshmem-rs
 
-An OpenSHMEM-style **partitioned global address space (PGAS)** library for Rust,
-modeled on the [OSSS-UCX](https://github.com/Sandia-OpenSHMEM/osss-ucx) reference
-implementation and built on the SedahsDev Rust bindings:
+An OpenSHMEM-style PGAS library for Rust, built on the SedahsDev `pmix-rs`,
+`ucx-rs`, and optional `ucc-rs` bindings.
 
-| Layer | Binding crate | Role |
-|-------|---------------|------|
-| Process bootstrap | [`pmix`](../pmix-rs) | `init`/`finalize`, rank & universe-size discovery, key/value exchange (worker addr + rkey + heap base) |
-| RMA data plane | [`ucx-sys`](../ucx-rs) | `put`/`get`, atomic ops, `fence`/`flush`/`quiet`, symmetric-memory registration & rkey packing |
-| Collectives | [`ucc`](../ucc-rs) | `barrier`, `broadcast`, `collect`, `reduce`/`to_all` |
+## Native libraries
 
-## Design
+The crate requires native PMIx (>= 5.0 for the base API) and UCX. Set
+`PMIX_PREFIX` to the PMIx installation, or leave it unset to use `pkg-config`,
+and make UCX discoverable through `pkg-config` (or the binding's normal build
+configuration). For a custom PMIx installation:
 
-OpenSHMEM gives every process (PE) a **symmetric heap**: an address space where an
-object allocated at rank `i` is addressable from every other rank at the same
-virtual offset. The reference implementation splits this across three substrates,
-and so do we:
+```bash
+export PMIX_PREFIX=/path/to/openpmix
+export LD_LIBRARY_PATH="$PMIX_PREFIX/lib:${LD_LIBRARY_PATH:-}"
+```
 
-- **Symmetric memory** is allocated from a **vendored pool** (jemalloc-derived,
-  modified to hand back an address-like `usize`) and registered with UCX
-  (`MemHandle::map`). The registration yields an rkey (`pack_rkey`) that each peer
-  unpacks (`RemoteKey::unpack`) to form a remote-memory handle for that PE's heap.
-  Allocations are wrapped in a private [`SymPtr`](src/symheap.rs) — a `usize`
-  convertible to the UCX remote pointer (`u64`) for a target PE — never a raw
-  `*mut u8` that leaks across PEs.
-- **Put/get/atomics** are issued on a UCX worker/endpoint pair to each peer PE
-  (`rma_put`, `rma_get`, `amo_add64`, …), giving us `shmem_*_put`, `shmem_*_get`,
-  and the `shmem_atomic_*` family.
-- **Ordering/completion** map to UCX primitives: `shmem_fence` → `ucp_ep_fence_nbx`
-  (ordering), `shmem_quiet` → `ucp_ep_flush_nbx` (completion). See the ucx-rs
-  checklist for the exact semantics.
-- **Bootstrap** uses PMIx the way OSSS-UCX's `pmix_client.c` does: `PMIx_Put` the
-  worker address and rkey, `PMIx_Commit`, `PMIx_Fence`, then `PMIx_Get` each peer's
-  handle before any RMA is issued.
-- **Collectives** (feature-gated) delegate to UCC team + collective builders.
+Collectives are optional: enable `--features collectives` when UCC 1.8.0 is
+installed and set `UCC_INCLUDE_DIR` and `UCC_LIB_DIR` (or set `UCC_PREFIX`). The
+`ucc` dependency is feature-gated because there is no system
+`pkg-config` UCC entry.
 
-## Status
+The CI checks compile and test the library without requiring a PMIx DVM or
+daemon. DVM-backed integration tests require a PRRTE installation and its
+corresponding `PATH` and `LD_LIBRARY_PATH` exports.
 
-Early design. See the issue tracker for the phased implementation roadmap.
-
-## Building
-
-Requires the sibling crates checked out next to this repo (path deps `../pmix-rs`,
-`../ucx-rs`, `../ucc-rs`), plus native PMIx + UCX (and UCC for collectives). See
-`hpc-workspace-map` / `hpc-binding-checklist` skills for native-lib discovery and
-the UCX transport capabilities table.
+See [docs/DESIGN.md](docs/DESIGN.md) for architecture and the implementation roadmap.
