@@ -18,6 +18,7 @@ use ucx_sys::context::Context;
 use ucx_sys::ep;
 use ucx_sys::ucs_thread_mode_t;
 use ucx_sys::worker::{MtWorker, RemoteWorkerAddress};
+use ucx_sys::{Request, RequestParamBuilder};
 
 use crate::error::{Error, Result};
 
@@ -113,6 +114,13 @@ impl UcxTransport {
             .create_ep(ep::ParamsBuilder::new().address(address).build())
             .map_err(Error::from)
     }
+
+    pub(crate) fn wait_request(&self, request: &Request) -> Result<()> {
+        match self.worker.wait_request(request).map_err(Error::from)? {
+            true => Ok(()),
+            false => Err(Error::Internal("UCX request completion timed out")),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -134,12 +142,147 @@ mod tests {
     }
 }
 
-/// A typed put, mirroring `shmem_<type>_put` (implemented in a later phase).
-pub fn put<T: Copy>(_dst_pe: i32, _src: &[T], _dst_offset: usize) {
-    todo!("issue: UCX rma_put via per-PE endpoint")
+/// Plain-old-data supported by the typed RMA interface.
+pub trait Pod: Copy + Sized {
+    const SIZE: usize;
+    fn encode(self, dst: &mut Vec<u8>);
+    fn decode(src: &[u8]) -> Result<Self>;
 }
 
-/// A typed get, mirroring `shmem_<type>_get` (implemented in a later phase).
-pub fn get<T: Copy>(_src_pe: i32, _src_offset: usize, _len: usize) -> Vec<T> {
-    todo!("issue: UCX rma_get via per-PE endpoint")
+macro_rules! pod_types {
+    ($($ty:ty => $size:expr),+ $(,)?) => {$ (
+        impl Pod for $ty {
+            const SIZE: usize = $size;
+            fn encode(self, dst: &mut Vec<u8>) { dst.extend_from_slice(&self.to_ne_bytes()); }
+            fn decode(src: &[u8]) -> Result<Self> {
+                let bytes: [u8; $size] = src.try_into().map_err(|_| Error::Internal("invalid typed RMA byte count"))?;
+                Ok(<$ty>::from_ne_bytes(bytes))
+            }
+        }
+    )+ };
+}
+
+pod_types!(u8 => 1, i8 => 1, u16 => 2, i16 => 2, u32 => 4, i32 => 4,
+           u64 => 8, i64 => 8, f32 => 4, f64 => 8);
+
+fn peer_and_address(
+    state: &crate::init::ShmemState,
+    pe: usize,
+    offset: usize,
+    len: usize,
+) -> Result<(&crate::bootstrap::PeerConnection, u64)> {
+    let pe = u32::try_from(pe).map_err(|_| Error::Usage("PE number is out of range"))?;
+    let peer = state
+        .peers
+        .get(&pe)
+        .ok_or(Error::Usage("PE number is not in the job"))?;
+    let offset = u64::try_from(offset).map_err(|_| Error::Usage("RMA offset is out of range"))?;
+    let address = peer
+        .heap_base
+        .checked_add(offset)
+        .ok_or(Error::Usage("RMA address overflow"))?;
+    offset
+        .checked_add(u64::try_from(len).map_err(|_| Error::Usage("RMA length is out of range"))?)
+        .ok_or(Error::Usage("RMA range overflow"))?;
+    Ok((peer, address))
+}
+
+/// Put raw bytes in the destination PE's symmetric heap.
+///
+/// UCX may return an asynchronous request. This safe wrapper waits for that
+/// request before returning, because the source is borrowed; future `quiet`
+/// support can provide deferred OpenSHMEM completion for owned buffers.
+pub fn putmem(dst_pe: usize, bytes: &[u8], dst_offset: usize) -> Result<()> {
+    crate::init::with_state(|state| {
+        let (peer, address) = peer_and_address(state, dst_pe, dst_offset, bytes.len())?;
+        if bytes.is_empty() {
+            return Ok(());
+        }
+        let params = RequestParamBuilder::new().build();
+        let request = peer
+            .endpoint
+            .rma_put(bytes, address, &peer.rkey, &params)
+            .map_err(Error::from)?;
+        if let Some(request) = request {
+            state.transport.wait_request(&request)?;
+            request.free();
+        }
+        Ok(())
+    })
+}
+
+/// Get raw bytes, decoding only after UCX request completion.
+pub fn getmem(src_pe: usize, src_offset: usize, len: usize) -> Result<Vec<u8>> {
+    crate::init::with_state(|state| {
+        let (peer, address) = peer_and_address(state, src_pe, src_offset, len)?;
+        let mut bytes = vec![0_u8; len];
+        if bytes.is_empty() {
+            return Ok(bytes);
+        }
+        let params = RequestParamBuilder::new().build();
+        let request = peer
+            .endpoint
+            .rma_get(&mut bytes, address, &peer.rkey, &params)
+            .map_err(Error::from)?;
+        if let Some(request) = request {
+            state.transport.wait_request(&request)?;
+            request.free();
+        }
+        Ok(bytes)
+    })
+}
+
+/// Put typed POD values in native-endian representation.
+pub fn put<T: Pod>(dst_pe: usize, src: &[T], dst_offset: usize) -> Result<()> {
+    let capacity = src
+        .len()
+        .checked_mul(T::SIZE)
+        .ok_or(Error::Usage("typed RMA length overflow"))?;
+    let mut bytes = Vec::with_capacity(capacity);
+    for &value in src {
+        value.encode(&mut bytes);
+    }
+    putmem(dst_pe, &bytes, dst_offset)
+}
+
+/// Get typed POD values after the underlying UCX request has completed.
+pub fn get<T: Pod>(src_pe: usize, src_offset: usize, len_elems: usize) -> Result<Vec<T>> {
+    let len = len_elems
+        .checked_mul(T::SIZE)
+        .ok_or(Error::Usage("typed RMA length overflow"))?;
+    getmem(src_pe, src_offset, len)?
+        .chunks_exact(T::SIZE)
+        .map(T::decode)
+        .collect()
+}
+
+#[cfg(test)]
+mod pod_tests {
+    use super::*;
+
+    fn roundtrip<T: Pod + PartialEq + std::fmt::Debug>(value: T) {
+        let mut bytes = Vec::new();
+        value.encode(&mut bytes);
+        assert_eq!(T::decode(&bytes).unwrap(), value);
+        assert_eq!(bytes.len(), T::SIZE);
+    }
+
+    #[test]
+    fn pod_covers_all_supported_scalar_types() {
+        roundtrip(1_u8);
+        roundtrip(-1_i8);
+        roundtrip(2_u16);
+        roundtrip(-2_i16);
+        roundtrip(3_u32);
+        roundtrip(-3_i32);
+        roundtrip(4_u64);
+        roundtrip(-4_i64);
+        roundtrip(1.5_f32);
+        roundtrip(-2.5_f64);
+    }
+
+    #[test]
+    fn typed_length_overflow_is_rejected_before_state_lookup() {
+        assert!(matches!(get::<u64>(0, 0, usize::MAX), Err(Error::Usage(_))));
+    }
 }

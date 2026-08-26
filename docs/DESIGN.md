@@ -21,6 +21,7 @@ The mapping mirrors how `osss-ucx/src/shmemc/ucx/*` wires the same three C libra
 | `shmem_my_pe` / `shmem_n_pes` | `init::my_pe()` / `init::n_pes()` | PMIx rank / universe size |
 | `shmem_malloc` / `shmem_free` | `symheap::SymAlloc::{malloc,free}` | Vendored jemalloc pool + UCX `MemHandle::map` / unmap |
 | `shmem_<t>_put` / `shmem_<t>_get` | `rma::put<T>` / `rma::get<T>` | UCX `rma_put` / `rma_get` |
+| `shmem_putmem` / `shmem_getmem` | `rma::putmem` / `rma::getmem` | UCX byte RMA |
 | `shmem_atomic_*` / fetch ops | `rma::atomic_*` | UCX `amo_*64` (+ `reply_buffer`) |
 | `shmem_fence` / `shmem_quiet` | `rma::fence()` / `rma::quiet()` | `ucp_ep_fence_nbx` / `ucp_ep_flush_nbx` |
 | `shmem_barrier*` / collectives | `coll::barrier` / `coll::*` | UCC team + collective builders |
@@ -60,6 +61,11 @@ OSSS-UCX's `comms.c` `translate_address` / `get_remote_key_and_addr` flow:
   remote pointer for a target PE, computed as `peer_heap_base + (local_address -
   local_heap_base)` so every PE preserves the same virtual offset.
 - `rma::put/get` pass this `u64` plus the peer's unpacked `RemoteKey` to UCX.
+
+Typed RMA supports the ten scalar `Pod` types (`u8/i8/u16/i16/u32/i32/u64/i64`
+and `f32/f64`) using native-endian byte encoding. Safe wrappers wait for UCX
+requests with the serialized worker progress loop and free them; `get` never
+reads its destination buffer before completion. Empty operations are no-ops.
 
 Application code cannot build a `SymPtr` from a raw pointer; only `SymAlloc`
 produces them, and only the crate converts them to remote addresses.

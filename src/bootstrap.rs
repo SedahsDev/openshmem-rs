@@ -2,7 +2,7 @@
 
 use std::{collections::BTreeMap, ffi::CStr};
 
-use pmix::{get_value, put_value, PmixClient, PmixScope, PmixValueBuilder};
+use pmix::{PmixClient, PmixScope, PmixValueBuilder, get_value, put_value};
 use ucx_sys::{ep::Ep, rma::RemoteKey, worker::RemoteWorkerAddress};
 
 use crate::{
@@ -20,10 +20,8 @@ const HEAP_RKEY_GET_KEY: &[u8] = b"shmem.heap.rkey\0";
 const HEAP_BASE_GET_KEY: &[u8] = b"shmem.heap.base\0";
 
 pub struct PeerConnection {
-    #[allow(dead_code)]
-    endpoint: Ep,
-    #[allow(dead_code)]
-    rkey: RemoteKey,
+    pub(crate) endpoint: Ep,
+    pub(crate) rkey: RemoteKey,
     pub heap_base: u64,
 }
 

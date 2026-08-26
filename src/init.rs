@@ -11,22 +11,22 @@
 
 use std::sync::{Mutex, OnceLock};
 
-use pmix::{get_value, PmixClient, RANK_WILDCARD};
+use pmix::{PmixClient, RANK_WILDCARD, get_value};
 
-use crate::bootstrap::{handshake, PeerConnection};
+use crate::bootstrap::{PeerConnection, handshake};
 use crate::error::{Error, Result};
 use crate::rma::UcxTransport;
 use crate::symheap::SymHeap;
 
-struct ShmemState {
+pub(crate) struct ShmemState {
     // Fields are dropped in declaration order. Drop peer UCX handles first,
     // then the heap, and finally the transport that owns their worker/context.
     #[allow(dead_code)]
-    peers: std::collections::BTreeMap<u32, PeerConnection>,
+    pub(crate) peers: std::collections::BTreeMap<u32, PeerConnection>,
     #[allow(dead_code)]
     heap: SymHeap,
     #[allow(dead_code)]
-    transport: UcxTransport,
+    pub(crate) transport: UcxTransport,
     client: PmixClient,
     rank: u32,
     size: usize,
@@ -44,6 +44,15 @@ fn lock_state() -> Result<std::sync::MutexGuard<'static, Option<ShmemState>>> {
     state()
         .lock()
         .map_err(|_| Error::Internal("lifecycle state lock poisoned"))
+}
+
+pub(crate) fn with_state<F, T>(operation: F) -> Result<T>
+where
+    F: FnOnce(&ShmemState) -> Result<T>,
+{
+    let state = lock_state()?;
+    let state = state.as_ref().ok_or(Error::NotInitialized)?;
+    operation(state)
 }
 
 /// Initialize the OpenSHMEM process and cache its PE identity.
