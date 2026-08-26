@@ -129,6 +129,10 @@ impl UcxTransport {
             }
         }
     }
+
+    pub(crate) fn fence(&self) -> Result<()> {
+        self.worker.fence().map_err(Error::from)
+    }
 }
 
 #[cfg(test)]
@@ -164,6 +168,21 @@ mod tests {
             .expect("loopback put")
         {
             transport.wait_request(&request).expect("put completion");
+            request.free();
+        }
+        transport.fence().expect("ordering fence");
+        if let Some(request) = endpoint
+            .rma_put(source, target.as_mut_ptr() as u64, &rkey, &params)
+            .expect("second loopback put")
+        {
+            transport
+                .wait_request(&request)
+                .expect("second put completion");
+            request.free();
+        }
+        let flush_params = RequestParamBuilder::new().build();
+        if let Some(request) = endpoint.flush(&flush_params).expect("endpoint flush") {
+            transport.wait_request(&request).expect("flush completion");
             request.free();
         }
         if let Some(request) = endpoint
@@ -290,6 +309,59 @@ pub fn get<T: Pod>(src_pe: usize, src_offset: usize, len_elems: usize) -> Result
         .chunks_exact(T::SIZE)
         .map(T::decode)
         .collect()
+}
+
+/// Order RMA operations issued before this call before RMA operations issued afterward.
+///
+/// This uses UCX's worker-scoped `ucp_worker_fence`, because ucx-rs exposes no
+/// per-endpoint fence wrapper. OpenSHMEM defines `shmem_fence` on the default
+/// context, so this process-wide ordering is stronger than per-PE ordering.
+/// It is not a completion operation: use [`quiet`] when remote data must be
+/// complete before proceeding.
+pub fn fence() -> Result<()> {
+    crate::init::with_state(|state| state.transport.fence())
+}
+
+/// Complete all outstanding RMA operations on every connected PE.
+///
+/// This is completion, not merely ordering: each endpoint flush waits until
+/// prior RMA has completed remotely. In contrast, [`fence`] only orders RMA
+/// before and after the call. Use quiet before observing remote results or
+/// reusing data that was the source of a put. This loops over endpoints so
+/// PE-specific completion remains explicit.
+pub fn quiet() -> Result<()> {
+    crate::init::with_state(|state| {
+        let params = RequestParamBuilder::new().build();
+        for peer in state.peers.values() {
+            if let Some(request) = peer.endpoint.flush(&params).map_err(Error::from)? {
+                state.transport.wait_request(&request)?;
+                request.free();
+            }
+        }
+        Ok(())
+    })
+}
+
+/// Complete outstanding RMA operations for one PE.
+pub fn quiet_pe(pe: usize) -> Result<()> {
+    crate::init::with_state(|state| {
+        let pe = u32::try_from(pe).map_err(|_| Error::Usage("PE number is out of range"))?;
+        let peer = state
+            .peers
+            .get(&pe)
+            .ok_or(Error::Usage("PE number is not in the job"))?;
+        let params = RequestParamBuilder::new().build();
+        if let Some(request) = peer.endpoint.flush(&params).map_err(Error::from)? {
+            state.transport.wait_request(&request)?;
+            request.free();
+        }
+        Ok(())
+    })
+}
+
+/// Alias for [`quiet`], completing RMA operations for all PEs.
+pub fn quiet_all() -> Result<()> {
+    quiet()
 }
 
 #[cfg(test)]
