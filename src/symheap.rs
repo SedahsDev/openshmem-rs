@@ -21,14 +21,35 @@ pub struct SymPtr(pub(crate) usize);
 
 impl SymPtr {
     /// Virtual offset of this allocation from the local heap base.
-    pub(crate) fn offset_from(&self, heap_base: u64) -> u64 {
+    #[allow(dead_code)] // consumed by later RMA phases
+    pub(crate) fn offset_from(self, heap_base: u64) -> u64 {
         (self.0 as u64).wrapping_sub(heap_base)
     }
 
     /// The UCX remote pointer for a target PE: peer heap base + this allocation's
     /// virtual offset. Symmetric addressing means every PE computes the same value.
-    pub(crate) fn to_remote_addr(&self, peer_base: u64) -> u64 {
-        peer_base.wrapping_add(self.offset_from(peer_base))
+    #[allow(dead_code)] // consumed by later RMA phases
+    pub(crate) fn to_remote_addr(self, peer_base: u64) -> u64 {
+        peer_base.wrapping_add(self.0 as u64)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SymPtr;
+
+    #[test]
+    fn offset_is_the_same_for_symmetric_bases() {
+        let offset = 0x1234_u64;
+        let local = SymPtr((0x1000 + offset) as usize);
+        let peer = SymPtr((0x9000 + offset) as usize);
+        assert_eq!(local.offset_from(0x1000), peer.offset_from(0x9000));
+    }
+
+    #[test]
+    fn remote_address_preserves_virtual_offset() {
+        let ptr = SymPtr(0x1234);
+        assert_eq!(ptr.to_remote_addr(0x9000), 0x9000 + 0x1234);
     }
 }
 
