@@ -15,7 +15,7 @@ use crate::{
     error::{Error, Result},
     rma::Pod,
 };
-use pmix::{PmixScope, get_value, put_value};
+use pmix::{get_value, put_value, PmixScope};
 use std::{ffi::c_void, ptr};
 use ucc::{
     bindings::{ucc_oob_coll_t, ucc_status_t_UCC_ERR_NO_MESSAGE, ucc_status_t_UCC_OK},
@@ -101,8 +101,10 @@ pub(crate) struct Runtime {
     _lib: UccLib,
     _oob: Box<OobState>,
 }
-// SAFETY: Every collective operation enters `with_state`, which holds the
+// SAFETY: Blocking collective operations enter `with_state`, which holds the
 // lifecycle mutex for the entire operation and therefore serializes UCC ops.
+// Non-blocking request progress/testing runs after posting and outside that
+// mutex; callers must use `_nb` requests from a single thread for now.
 unsafe impl Send for Runtime {}
 
 impl Runtime {
@@ -182,13 +184,16 @@ impl<'a> CollectiveRequest<'a> {
     }
 
     /// Poll without blocking. Returns false while UCC still needs progress.
+    ///
+    /// Non-blocking requests are currently intended for single-threaded use:
+    /// this method drives progress outside the lifecycle mutex.
     pub fn test(&mut self) -> Result<bool> {
-        let op = self
-            .op
-            .as_ref()
-            .ok_or(Error::Internal("collective request already finalized"))?;
+        let Some(op) = self.op.as_ref() else {
+            return Ok(true);
+        };
         let status = unsafe { (*op.request()).status };
         if status == ucc_status_t_UCC_ERR_NO_MESSAGE {
+            self.context.progress();
             return Ok(false);
         }
         if status != ucc_status_t_UCC_OK {
@@ -210,9 +215,7 @@ impl<'a> CollectiveRequest<'a> {
 
     /// Drive UCC progress until completion.
     pub fn wait(&mut self) -> Result<()> {
-        while !self.test()? {
-            self.context.progress();
-        }
+        while !self.test()? {}
         Ok(())
     }
 
