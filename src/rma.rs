@@ -223,8 +223,25 @@ mod tests {
     }
 }
 
+/// Private sealing marker so the impl set of [`Pod`] is closed to this crate.
+///
+/// Soundness of [`pod_as_bytes`] — reinterpreting `&[T]` as `&[u8]` and sending
+/// the object representation over the wire — depends on every `Pod` being one of
+/// the ten native-endian scalars below (no padding, `encode` == object
+/// representation). A non-sealed `Pod` could be implemented downstream for a
+/// struct with internal padding, making the raw-byte view read uninitialized
+/// bytes from safe code (UB), or for a type whose `encode` differs from its
+/// in-memory layout (silent data corruption). Sealing closes that set.
+mod private {
+    pub trait Sealed {}
+}
+
 /// Plain-old-data supported by the typed RMA interface.
-pub trait Pod: Copy + Sized {
+///
+/// **Sealed** — implementations are closed to the crate (the ten scalar types
+/// `u8/i8/u16/i16/u32/i32/u64/i64/f32/f64`). This is what lets `put` view
+/// `&[T]` as native-endian wire bytes soundly.
+pub trait Pod: Copy + Sized + private::Sealed {
     const SIZE: usize;
     fn encode(self, dst: &mut Vec<u8>);
     fn decode(src: &[u8]) -> Result<Self>;
@@ -236,6 +253,7 @@ pub trait Pod: Copy + Sized {
 
 macro_rules! pod_types {
     ($($ty:ty => $size:expr => $ucc:expr => $reduce:expr),+ $(,)?) => {$ (
+        impl private::Sealed for $ty {}
         impl Pod for $ty {
             const SIZE: usize = $size;
             fn encode(self, dst: &mut Vec<u8>) { dst.extend_from_slice(&self.to_ne_bytes()); }
@@ -331,17 +349,35 @@ pub fn getmem(src_pe: usize, src_offset: usize, len: usize) -> Result<Vec<u8>> {
     })
 }
 
-/// Put typed POD values in native-endian representation.
-pub fn put<T: Pod>(dst_pe: usize, src: &[T], dst_offset: usize) -> Result<()> {
-    let capacity = src
+/// View a `Pod` slice as the native-endian bytes `putmem` already transfers.
+///
+/// Every `Pod` impl is a scalar whose `encode` is `to_ne_bytes`, so the
+/// in-memory representation is the wire format. No padding: `SIZE` equals
+/// `size_of::<T>()` for the ten impls.
+fn pod_as_bytes<T: Pod>(src: &[T]) -> Result<&[u8]> {
+    if T::SIZE != std::mem::size_of::<T>() {
+        return Err(Error::Internal("Pod SIZE does not match size_of"));
+    }
+    let len = src
         .len()
         .checked_mul(T::SIZE)
         .ok_or(Error::Usage("typed RMA length overflow"))?;
-    let mut bytes = Vec::with_capacity(capacity);
-    for &value in src {
-        value.encode(&mut bytes);
-    }
-    putmem(dst_pe, &bytes, dst_offset)
+    // SAFETY: `Pod` is sealed (see `private::Sealed`), so `T` is one of the ten
+    // scalar types below. They are `Copy`, have no padding (`SIZE == size_of`),
+    // and `encode` writes `to_ne_bytes()`, which is exactly the object
+    // representation. The returned slice borrows `src` for the duration of the
+    // blocking `putmem` (which waits for the UCX request), so the origin remains
+    // valid for the transfer.
+    Ok(unsafe { std::slice::from_raw_parts(src.as_ptr().cast::<u8>(), len) })
+}
+
+/// Put typed POD values in native-endian representation.
+///
+/// The source slice is passed through to UCX without an intermediate
+/// encode buffer. Completion still waits inside `putmem` so the borrow
+/// remains valid for the transfer.
+pub fn put<T: Pod>(dst_pe: usize, src: &[T], dst_offset: usize) -> Result<()> {
+    putmem(dst_pe, pod_as_bytes(src)?, dst_offset)
 }
 
 /// Get typed POD values after the underlying UCX request has completed.
@@ -901,6 +937,7 @@ mod pod_tests {
         value.encode(&mut bytes);
         assert_eq!(T::decode(&bytes).unwrap(), value);
         assert_eq!(bytes.len(), T::SIZE);
+        assert_eq!(pod_as_bytes(std::slice::from_ref(&value)).unwrap(), bytes);
     }
 
     #[test]
