@@ -75,9 +75,11 @@ OSSS-UCX's `comms.c` `translate_address` / `get_remote_key_and_addr` flow:
 - `rma::put/get` pass this `u64` plus the peer's unpacked `RemoteKey` to UCX.
 
 Typed RMA supports the ten scalar `Pod` types (`u8/i8/u16/i16/u32/i32/u64/i64`
-and `f32/f64`) using native-endian byte encoding. Safe wrappers wait for UCX
-requests with the serialized worker progress loop and free them; `get` never
-reads its destination buffer before completion. Empty operations are no-ops.
+and `f32/f64`). `put` reinterprets `&[T]` as native-endian bytes and calls
+`putmem` with no intermediate `Vec`; `get` still materializes a `Vec<u8>` and
+decodes after UCX completion. Safe wrappers wait for UCX requests with the
+serialized worker progress loop and free them; `get` never reads its destination
+buffer before completion. Empty operations are no-ops.
 
 Application code cannot build a `SymPtr` from a raw pointer; only `SymAlloc`
 produces them, and only the crate converts them to remote addresses.
