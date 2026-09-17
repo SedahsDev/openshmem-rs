@@ -7,12 +7,10 @@ description = "OpenSHMEM-style partitioned global address space (PGAS) library f
 license = "MIT"
 
 [dependencies]
-# Pinned to the current heads of the sibling crates:
-#   pmix-rs  c5ae064 (github/main)
-#   ucx-rs   09b8ec6 (github/master)
-pmix = { path = "/home/bzf/projects/pmix-rs-latest" }
-ucx-sys = { path = "/home/bzf/projects/ucx-rs-latest" }
-ucc = { path = "/home/bzf/projects/ucc-rs", optional = true }
+# Sibling crates pinned to exact revisions so CI does not depend on local checkouts.
+pmix = { git = "https://github.com/SedahsDev/pmix-rs.git", rev = "c5ae064a0f4615f1aa1f45bb2e4a8a3e27e9d098" }
+ucx-sys = { git = "https://github.com/SedahsDev/ucx-rs.git", rev = "e03af4a8e1c052b7ba1aebcc20177f1acb21cc61" }
+ucc = { git = "https://github.com/SedahsDev/ucc-rs.git", rev = "f0f13ed657a418326c242da02e8aec5b7e4b10a0", optional = true }
 
 [features]
 default = []
