@@ -23,8 +23,7 @@ pub(crate) struct ShmemState {
     // then the heap, and finally the transport that owns their worker/context.
     #[allow(dead_code)]
     pub(crate) peers: std::collections::BTreeMap<u32, PeerConnection>,
-    #[allow(dead_code)]
-    heap: SymHeap,
+    pub(crate) heap: SymHeap,
     #[allow(dead_code)]
     pub(crate) transport: UcxTransport,
     #[cfg(feature = "collectives")]
@@ -54,6 +53,15 @@ where
 {
     let state = lock_state()?;
     let state = state.as_ref().ok_or(Error::NotInitialized)?;
+    operation(state)
+}
+
+pub(crate) fn with_state_mut<F, T>(operation: F) -> Result<T>
+where
+    F: FnOnce(&mut ShmemState) -> Result<T>,
+{
+    let mut state = lock_state()?;
+    let state = state.as_mut().ok_or(Error::NotInitialized)?;
     operation(state)
 }
 
@@ -163,31 +171,6 @@ pub fn n_pes() -> Result<usize> {
         .ok_or(Error::NotInitialized)
 }
 
-/// Allocate a symmetric buffer from this PE's registered heap.
-pub fn malloc(size: usize) -> Result<crate::symheap::SymPtr> {
-    let mut state = lock_state()?;
-    state
-        .as_mut()
-        .ok_or(Error::NotInitialized)?
-        .heap
-        .malloc(size)
-}
-
-/// Return this process's symmetric heap base address.
-pub fn heap_base() -> Result<u64> {
-    let state = lock_state()?;
-    Ok(state
-        .as_ref()
-        .ok_or(Error::NotInitialized)?
-        .heap
-        .local_base())
-}
-
-/// Free a buffer previously returned by [`malloc`].
-pub fn free(ptr: crate::symheap::SymPtr) -> Result<()> {
-    let mut state = lock_state()?;
-    state.as_mut().ok_or(Error::NotInitialized)?.heap.free(ptr)
-}
 
 /// Finalize the PMIx session.
 ///

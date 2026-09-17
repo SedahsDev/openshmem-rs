@@ -4,7 +4,7 @@
 
 use std::time::{Duration, Instant};
 
-use openshmem::{init, rma};
+use openshmem::{init, rma, symheap};
 
 const TARGET_PE: usize = 1;
 const VALUE_OFFSET: usize = 0;
@@ -21,8 +21,8 @@ fn run() -> openshmem::error::Result<()> {
         ));
     }
 
-    let buffer = init::malloc(std::mem::size_of::<u64>())?;
-    let offset = buffer.offset_from(init::heap_base()?)?;
+    let buffer = symheap::malloc(std::mem::size_of::<u64>())?;
+    let offset = buffer.offset_from(symheap::heap_base()?)?;
     if rank == 0 {
         rma::put(TARGET_PE, &[VALUE], offset + VALUE_OFFSET)?;
         rma::fence()?;
@@ -44,7 +44,7 @@ fn run() -> openshmem::error::Result<()> {
         }
         println!("PE 1 got and verified {VALUE:#x}");
     }
-    init::free(buffer)?;
+    symheap::free(buffer)?;
     Ok(())
 }
 

@@ -212,6 +212,26 @@ impl SymHeap {
     }
 }
 
+/// Allocate a symmetric buffer from this PE's registered heap, mirroring
+/// `shmem_malloc`.
+///
+/// Requires [`crate::init::init`] to have completed; returns
+/// [`Error::NotInitialized`] before it does.
+pub fn malloc(size: usize) -> Result<SymPtr> {
+    crate::init::with_state_mut(|state| state.heap.malloc(size))
+}
+
+/// Return this process's symmetric heap base address, mirroring the base of a
+/// `shmem_malloc` region.
+pub fn heap_base() -> Result<u64> {
+    crate::init::with_state(|state| Ok(state.heap.local_base()))
+}
+
+/// Free a buffer previously returned by [`malloc`], mirroring `shmem_free`.
+pub fn free(ptr: SymPtr) -> Result<()> {
+    crate::init::with_state_mut(|state| state.heap.free(ptr))
+}
+
 /// Thin handle for allocations from a stored symmetric heap.
 pub struct SymAlloc(std::sync::Mutex<SymHeap>);
 
