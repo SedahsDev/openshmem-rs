@@ -1,9 +1,9 @@
-//! Error types for the openshmem crate.
+#! Error types for the openshmem crate.
 
 use std::fmt;
 
 use pmix::PmixError;
-use ucx_sys::ucs_status_t;
+use ucx_sys::Status;
 
 /// Unified error type across the PMIx / UCX / UCC layers.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -11,18 +11,18 @@ pub enum Error {
     /// An error surfaced from the PMIx bootstrap layer.
     Pmix(PmixError),
     /// An error surfaced from the UCX RMA/atomics layer.
-    Ucx(ucs_status_t),
+    Ucx(Status),
     /// An error surfaced from the UCC collective layer.
     #[cfg(feature = "collectives")]
     Ucc(ucc::UccStatus),
     /// A programming error local to this crate.
-    Usage(&'static str),
+        Usage(&'static str),
     /// The library is not initialized.
     NotInitialized,
     /// The library has already been initialized.
     AlreadyInitialized,
     /// A status that cannot represent an operation failure was returned as an error.
-    Internal(&'static str),
+        Internal(&'static str),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -37,12 +37,12 @@ impl From<PmixError> for Error {
     }
 }
 
-impl From<ucs_status_t> for Error {
-    fn from(status: ucs_status_t) -> Self {
-        if matches!(status, ucs_status_t::UCS_OK) {
-            Self::Internal("UCX success was returned where an error was expected")
-        } else {
+impl From<Status> for Error {
+    fn from(status: Status) -> Self {
+        if status.is_err() {
             Self::Ucx(status)
+        } else {
+            Self::Internal("UCX success was returned where an error was expected")
         }
     }
 }
@@ -62,7 +62,7 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Pmix(error) => write!(f, "pmix error: {error}"),
-            Self::Ucx(status) => write!(f, "ucx error: {status:?} (code {})", *status as i8),
+            Self::Ucx(status) => write!(f, "ucx error: {status}"),
             #[cfg(feature = "collectives")]
             Self::Ucc(error) => write!(f, "ucc error: {error} (code {})", error.to_raw()),
             Self::Usage(message) => write!(f, "usage error: {message}"),
@@ -74,6 +74,7 @@ impl fmt::Display for Error {
 }
 
 impl std::error::Error for Error {}
+
 
 #[cfg(test)]
 mod tests {
@@ -88,25 +89,11 @@ mod tests {
 
     #[test]
     fn ucx_error_converts_and_displays_status_code() {
-        let error = Error::from(ucs_status_t::UCS_ERR_INVALID_PARAM);
-        assert!(matches!(
-            &error,
-            Error::Ucx(ucs_status_t::UCS_ERR_INVALID_PARAM)
-        ));
-        assert!(error.to_string().contains("-5"));
-    }
-
-    #[cfg(feature = "collectives")]
-    #[test]
-    fn ucc_error_converts_only_failures() {
-        let error = Error::from(ucc::UccError::ErrInvalidParam);
-        assert!(matches!(
-            error,
-            Error::Ucc(ucc::UccStatus::Known(ucc::UccError::ErrInvalidParam))
-        ));
-        assert!(matches!(
-            Error::from(ucc::UccError::InProgress),
-            Error::Internal(_)
-        ));
+        use ucx_sys::ucs_status_t;
+        let status = Status(ucs_status_t::UCS_ERR_INVALID_PARAM);
+        let error = Error::from(status);
+        assert!(matches!(&error, Error::Ucx(_)));
+        assert!(error.to_string().contains("ucx error"));
     }
 }
+

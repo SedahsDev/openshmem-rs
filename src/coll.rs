@@ -240,8 +240,8 @@ fn decode_to<T: Pod>(bytes: &[u8], destination: *mut u8, count: usize) -> Result
     decode(bytes, values)
 }
 
-fn dtype<T: Pod>() -> u32 {
-    T::ucc_datatype().as_raw() as u32
+fn dtype<T: Pod>() -> ucc::collective::DataType {
+    T::ucc_datatype()
 }
 fn encode<T: Pod>(values: &[T]) -> Result<Vec<u8>> {
     let capacity = values

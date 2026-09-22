@@ -432,35 +432,35 @@ pub trait AtomicValue: Copy + 'static {
         addr: u64,
         key: &ucx_sys::rma::RemoteKey,
         p: &ucx_sys::RequestParam,
-    ) -> std::result::Result<Option<Request>, ucx_sys::ucs_status_t>;
+    ) -> std::result::Result<Option<Request>, ucx_sys::Status>;
     fn xor(
         ep: &ep::Ep,
         operand: Self::Bits,
         addr: u64,
         key: &ucx_sys::rma::RemoteKey,
         p: &ucx_sys::RequestParam,
-    ) -> std::result::Result<Option<Request>, ucx_sys::ucs_status_t>;
+    ) -> std::result::Result<Option<Request>, ucx_sys::Status>;
     fn swap(
         ep: &ep::Ep,
         operand: Self::Bits,
         addr: u64,
         key: &ucx_sys::rma::RemoteKey,
         p: &ucx_sys::RequestParam,
-    ) -> std::result::Result<Option<Request>, ucx_sys::ucs_status_t>;
+    ) -> std::result::Result<Option<Request>, ucx_sys::Status>;
     fn and(
         ep: &ep::Ep,
         operand: Self::Bits,
         addr: u64,
         key: &ucx_sys::rma::RemoteKey,
         p: &ucx_sys::RequestParam,
-    ) -> std::result::Result<Option<Request>, ucx_sys::ucs_status_t>;
+    ) -> std::result::Result<Option<Request>, ucx_sys::Status>;
     fn or(
         ep: &ep::Ep,
         operand: Self::Bits,
         addr: u64,
         key: &ucx_sys::rma::RemoteKey,
         p: &ucx_sys::RequestParam,
-    ) -> std::result::Result<Option<Request>, ucx_sys::ucs_status_t>;
+    ) -> std::result::Result<Option<Request>, ucx_sys::Status>;
     fn cswap(
         ep: &ep::Ep,
         expected: Self::Bits,
@@ -468,7 +468,7 @@ pub trait AtomicValue: Copy + 'static {
         addr: u64,
         key: &ucx_sys::rma::RemoteKey,
         p: &ucx_sys::RequestParam,
-    ) -> std::result::Result<Option<Request>, ucx_sys::ucs_status_t>;
+    ) -> std::result::Result<Option<Request>, ucx_sys::Status>;
     fn fadd<'w, 'a>(
         ep: &ep::Ep,
         w: &'w ucx_sys::worker::Worker,
@@ -476,7 +476,7 @@ pub trait AtomicValue: Copy + 'static {
         addr: u64,
         key: &ucx_sys::rma::RemoteKey,
         reply: &'a mut Self::Bits,
-    ) -> std::result::Result<ucx_sys::rma::FetchAmoRequest<'w, 'a, Self::Bits>, ucx_sys::ucs_status_t>;
+    ) -> std::result::Result<ucx_sys::rma::FetchAmoRequest<'w, 'a, Self::Bits>, ucx_sys::Status>;
     fn fxor<'w, 'a>(
         ep: &ep::Ep,
         w: &'w ucx_sys::worker::Worker,
@@ -484,7 +484,7 @@ pub trait AtomicValue: Copy + 'static {
         addr: u64,
         key: &ucx_sys::rma::RemoteKey,
         reply: &'a mut Self::Bits,
-    ) -> std::result::Result<ucx_sys::rma::FetchAmoRequest<'w, 'a, Self::Bits>, ucx_sys::ucs_status_t>;
+    ) -> std::result::Result<ucx_sys::rma::FetchAmoRequest<'w, 'a, Self::Bits>, ucx_sys::Status>;
     fn fswap<'w, 'a>(
         ep: &ep::Ep,
         w: &'w ucx_sys::worker::Worker,
@@ -492,7 +492,7 @@ pub trait AtomicValue: Copy + 'static {
         addr: u64,
         key: &ucx_sys::rma::RemoteKey,
         reply: &'a mut Self::Bits,
-    ) -> std::result::Result<ucx_sys::rma::FetchAmoRequest<'w, 'a, Self::Bits>, ucx_sys::ucs_status_t>;
+    ) -> std::result::Result<ucx_sys::rma::FetchAmoRequest<'w, 'a, Self::Bits>, ucx_sys::Status>;
     fn fcswap<'w, 'a>(
         ep: &ep::Ep,
         w: &'w ucx_sys::worker::Worker,
@@ -501,7 +501,7 @@ pub trait AtomicValue: Copy + 'static {
         addr: u64,
         key: &ucx_sys::rma::RemoteKey,
         reply: &'a mut Self::Bits,
-    ) -> std::result::Result<ucx_sys::rma::FetchAmoRequest<'w, 'a, Self::Bits>, ucx_sys::ucs_status_t>;
+    ) -> std::result::Result<ucx_sys::rma::FetchAmoRequest<'w, 'a, Self::Bits>, ucx_sys::Status>;
 }
 
 macro_rules! atomic_family {
@@ -521,7 +521,7 @@ macro_rules! atomic_family {
                 a: u64,
                 k: &ucx_sys::rma::RemoteKey,
                 p: &ucx_sys::RequestParam,
-            ) -> std::result::Result<Option<Request>, ucx_sys::ucs_status_t> {
+            ) -> std::result::Result<Option<Request>, ucx_sys::Status> {
                 e.$add(v, a, k, p)
             }
             fn xor(
@@ -530,7 +530,7 @@ macro_rules! atomic_family {
                 a: u64,
                 k: &ucx_sys::rma::RemoteKey,
                 p: &ucx_sys::RequestParam,
-            ) -> std::result::Result<Option<Request>, ucx_sys::ucs_status_t> {
+            ) -> std::result::Result<Option<Request>, ucx_sys::Status> {
                 e.$xor(v, a, k, p)
             }
             fn swap(
@@ -539,7 +539,7 @@ macro_rules! atomic_family {
                 a: u64,
                 k: &ucx_sys::rma::RemoteKey,
                 p: &ucx_sys::RequestParam,
-            ) -> std::result::Result<Option<Request>, ucx_sys::ucs_status_t> {
+            ) -> std::result::Result<Option<Request>, ucx_sys::Status> {
                 e.$swap(v, a, k, p)
             }
             fn and(
@@ -548,7 +548,7 @@ macro_rules! atomic_family {
                 a: u64,
                 k: &ucx_sys::rma::RemoteKey,
                 p: &ucx_sys::RequestParam,
-            ) -> std::result::Result<Option<Request>, ucx_sys::ucs_status_t> {
+            ) -> std::result::Result<Option<Request>, ucx_sys::Status> {
                 e.$and(v, a, k, p)
             }
             fn or(
@@ -557,7 +557,7 @@ macro_rules! atomic_family {
                 a: u64,
                 k: &ucx_sys::rma::RemoteKey,
                 p: &ucx_sys::RequestParam,
-            ) -> std::result::Result<Option<Request>, ucx_sys::ucs_status_t> {
+            ) -> std::result::Result<Option<Request>, ucx_sys::Status> {
                 e.$or(v, a, k, p)
             }
             fn cswap(
@@ -567,7 +567,7 @@ macro_rules! atomic_family {
                 a: u64,
                 k: &ucx_sys::rma::RemoteKey,
                 p: &ucx_sys::RequestParam,
-            ) -> std::result::Result<Option<Request>, ucx_sys::ucs_status_t> {
+            ) -> std::result::Result<Option<Request>, ucx_sys::Status> {
                 e.$cswap(x, y, a, k, p)
             }
             fn fadd<'w, 'a>(
@@ -579,7 +579,7 @@ macro_rules! atomic_family {
                 r: &'a mut $unsigned,
             ) -> std::result::Result<
                 ucx_sys::rma::FetchAmoRequest<'w, 'a, $unsigned>,
-                ucx_sys::ucs_status_t,
+                ucx_sys::Status,
             > {
                 e.$fadd(w, v, a, k, r)
             }
@@ -592,7 +592,7 @@ macro_rules! atomic_family {
                 r: &'a mut $unsigned,
             ) -> std::result::Result<
                 ucx_sys::rma::FetchAmoRequest<'w, 'a, $unsigned>,
-                ucx_sys::ucs_status_t,
+                ucx_sys::Status,
             > {
                 e.$fxor(w, v, a, k, r)
             }
@@ -605,7 +605,7 @@ macro_rules! atomic_family {
                 r: &'a mut $unsigned,
             ) -> std::result::Result<
                 ucx_sys::rma::FetchAmoRequest<'w, 'a, $unsigned>,
-                ucx_sys::ucs_status_t,
+                ucx_sys::Status,
             > {
                 e.$fswap(w, v, a, k, r)
             }
@@ -619,7 +619,7 @@ macro_rules! atomic_family {
                 r: &'a mut $unsigned,
             ) -> std::result::Result<
                 ucx_sys::rma::FetchAmoRequest<'w, 'a, $unsigned>,
-                ucx_sys::ucs_status_t,
+                ucx_sys::Status,
             > {
                 e.$fcswap(w, x, y, a, k, r)
             }
@@ -639,7 +639,7 @@ macro_rules! atomic_family {
                 a: u64,
                 k: &ucx_sys::rma::RemoteKey,
                 p: &ucx_sys::RequestParam,
-            ) -> std::result::Result<Option<Request>, ucx_sys::ucs_status_t> {
+            ) -> std::result::Result<Option<Request>, ucx_sys::Status> {
                 <$unsigned>::add(e, v, a, k, p)
             }
             fn xor(
@@ -648,7 +648,7 @@ macro_rules! atomic_family {
                 a: u64,
                 k: &ucx_sys::rma::RemoteKey,
                 p: &ucx_sys::RequestParam,
-            ) -> std::result::Result<Option<Request>, ucx_sys::ucs_status_t> {
+            ) -> std::result::Result<Option<Request>, ucx_sys::Status> {
                 <$unsigned>::xor(e, v, a, k, p)
             }
             fn swap(
@@ -657,7 +657,7 @@ macro_rules! atomic_family {
                 a: u64,
                 k: &ucx_sys::rma::RemoteKey,
                 p: &ucx_sys::RequestParam,
-            ) -> std::result::Result<Option<Request>, ucx_sys::ucs_status_t> {
+            ) -> std::result::Result<Option<Request>, ucx_sys::Status> {
                 <$unsigned>::swap(e, v, a, k, p)
             }
             fn and(
@@ -666,7 +666,7 @@ macro_rules! atomic_family {
                 a: u64,
                 k: &ucx_sys::rma::RemoteKey,
                 p: &ucx_sys::RequestParam,
-            ) -> std::result::Result<Option<Request>, ucx_sys::ucs_status_t> {
+            ) -> std::result::Result<Option<Request>, ucx_sys::Status> {
                 <$unsigned>::and(e, v, a, k, p)
             }
             fn or(
@@ -675,7 +675,7 @@ macro_rules! atomic_family {
                 a: u64,
                 k: &ucx_sys::rma::RemoteKey,
                 p: &ucx_sys::RequestParam,
-            ) -> std::result::Result<Option<Request>, ucx_sys::ucs_status_t> {
+            ) -> std::result::Result<Option<Request>, ucx_sys::Status> {
                 <$unsigned>::or(e, v, a, k, p)
             }
             fn cswap(
@@ -685,7 +685,7 @@ macro_rules! atomic_family {
                 a: u64,
                 k: &ucx_sys::rma::RemoteKey,
                 p: &ucx_sys::RequestParam,
-            ) -> std::result::Result<Option<Request>, ucx_sys::ucs_status_t> {
+            ) -> std::result::Result<Option<Request>, ucx_sys::Status> {
                 <$unsigned>::cswap(e, x, y, a, k, p)
             }
             fn fadd<'w, 'a>(
@@ -697,7 +697,7 @@ macro_rules! atomic_family {
                 r: &'a mut $unsigned,
             ) -> std::result::Result<
                 ucx_sys::rma::FetchAmoRequest<'w, 'a, $unsigned>,
-                ucx_sys::ucs_status_t,
+                ucx_sys::Status,
             > {
                 <$unsigned>::fadd(e, w, v, a, k, r)
             }
@@ -710,7 +710,7 @@ macro_rules! atomic_family {
                 r: &'a mut $unsigned,
             ) -> std::result::Result<
                 ucx_sys::rma::FetchAmoRequest<'w, 'a, $unsigned>,
-                ucx_sys::ucs_status_t,
+                ucx_sys::Status,
             > {
                 <$unsigned>::fxor(e, w, v, a, k, r)
             }
@@ -723,7 +723,7 @@ macro_rules! atomic_family {
                 r: &'a mut $unsigned,
             ) -> std::result::Result<
                 ucx_sys::rma::FetchAmoRequest<'w, 'a, $unsigned>,
-                ucx_sys::ucs_status_t,
+                ucx_sys::Status,
             > {
                 <$unsigned>::fswap(e, w, v, a, k, r)
             }
@@ -737,7 +737,7 @@ macro_rules! atomic_family {
                 r: &'a mut $unsigned,
             ) -> std::result::Result<
                 ucx_sys::rma::FetchAmoRequest<'w, 'a, $unsigned>,
-                ucx_sys::ucs_status_t,
+                ucx_sys::Status,
             > {
                 <$unsigned>::fcswap(e, w, x, y, a, k, r)
             }
